@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     keys::encode_key,
     logs::{capture_output, forward_input, tail_file, tail_lines},
+    procinfo::process_start_time,
     paths::{
         create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin, resolve_cwd,
         resolve_program_path, session_dir, sessions_root, validate_session_name, write_atomic,
@@ -45,6 +46,13 @@ pub struct SessionMetadata {
     pub status: SessionStatus,
     pub supervisor_pid: Option<u32>,
     pub child_pid: Option<u32>,
+    /// Start-time token for the supervisor PID; pairs with the PID to survive
+    /// PID reuse. `None` for sessions written before this field existed.
+    #[serde(default)]
+    pub supervisor_start_time: Option<u64>,
+    /// Start-time token for the child PID.
+    #[serde(default)]
+    pub child_start_time: Option<u64>,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub exit_status: Option<String>,
@@ -77,11 +85,7 @@ pub fn start_session_detached(
     ensure_bridge_dir(&session_dir)?;
 
     if let Ok(metadata) = load_metadata(name) {
-        if metadata.status == SessionStatus::Running
-            && metadata
-                .supervisor_pid
-                .is_some_and(|pid| process_alive(pid as i32))
-        {
+        if session_is_active(&metadata) {
             bail!("session '{name}' is already running");
         }
     }
@@ -157,6 +161,8 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
         status: SessionStatus::Starting,
         supervisor_pid: None,
         child_pid: None,
+        supervisor_start_time: None,
+        child_start_time: None,
         created_at_unix: now_unix(),
         updated_at_unix: now_unix(),
         exit_status: None,
@@ -189,7 +195,9 @@ pub fn run_supervisor(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     validate_session_name(name)?;
 
     let mut metadata = load_metadata(name)?;
-    metadata.supervisor_pid = Some(std::process::id());
+    let supervisor_pid = std::process::id();
+    metadata.supervisor_pid = Some(supervisor_pid);
+    metadata.supervisor_start_time = process_start_time(supervisor_pid);
     metadata.updated_at_unix = now_unix();
     save_metadata(&metadata)?;
 
@@ -253,6 +261,7 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
     metadata.command = command_parts;
     metadata.status = SessionStatus::Running;
     metadata.child_pid = child.process_id();
+    metadata.child_start_time = child.process_id().and_then(process_start_time);
     metadata.updated_at_unix = now_unix();
     save_metadata(&metadata)?;
 
@@ -412,12 +421,8 @@ pub fn print_status(name: &str) -> Result<()> {
 pub fn status_text(name: &str) -> Result<String> {
     validate_session_name(name)?;
     let metadata = load_metadata(name)?;
-    let supervisor_alive = metadata
-        .supervisor_pid
-        .is_some_and(|pid| process_alive(pid as i32));
-    let child_alive = metadata
-        .child_pid
-        .is_some_and(|pid| process_alive(pid as i32));
+    let supervisor_alive = pid_is_ours(metadata.supervisor_pid, metadata.supervisor_start_time);
+    let child_alive = pid_is_ours(metadata.child_pid, metadata.child_start_time);
 
     let mut output = String::new();
     output.push_str(&format!("name: {}\n", metadata.name));
@@ -465,9 +470,7 @@ pub fn list_sessions_text() -> Result<String> {
 
     let mut output = String::new();
     for metadata in sessions {
-        let child_alive = metadata
-            .child_pid
-            .is_some_and(|pid| process_alive(pid as i32));
+        let child_alive = pid_is_ours(metadata.child_pid, metadata.child_start_time);
         output.push_str(&format!(
             "{}\t{:?}\tchild_alive={}\tcmd={}",
             metadata.name,
@@ -491,15 +494,26 @@ pub fn stop_session(name: &str) -> Result<()> {
 pub fn stop_session_silent(name: &str) -> Result<()> {
     validate_session_name(name)?;
     let metadata = load_metadata(name)?;
+
+    // Already stopped: nothing to signal. Return without re-signaling possibly
+    // recycled PIDs or overwriting the recorded exit status.
+    if metadata.status == SessionStatus::Stopped {
+        return Ok(());
+    }
+
     let mut errors = Vec::new();
 
-    if let Some(child_pid) = metadata.child_pid {
+    // Only signal a PID we can still positively identify as ours, so a PID that
+    // was recycled after an unclean shutdown is never killed (nor its group).
+    if pid_is_ours(metadata.child_pid, metadata.child_start_time) {
+        let child_pid = metadata.child_pid.expect("pid_is_ours implies Some");
         if let Err(error) = terminate_pid(child_pid as i32) {
             errors.push(format!("child pid {child_pid}: {error}"));
         }
     }
 
-    if let Some(supervisor_pid) = metadata.supervisor_pid {
+    if pid_is_ours(metadata.supervisor_pid, metadata.supervisor_start_time) {
+        let supervisor_pid = metadata.supervisor_pid.expect("pid_is_ours implies Some");
         if let Err(error) = terminate_pid(supervisor_pid as i32) {
             errors.push(format!("supervisor pid {supervisor_pid}: {error}"));
         }
@@ -591,6 +605,32 @@ pub fn process_alive(pid: i32) -> bool {
         Err(Errno::EPERM) => true,
         Err(_) => false,
     }
+}
+
+/// True if `pid` is alive AND, when a start-time token was recorded, still
+/// carries that token — so a recycled PID (after an unclean shutdown) is not
+/// mistaken for this session's process. With no recorded token (older metadata
+/// or an unsupported platform) this falls back to a bare liveness probe.
+pub fn pid_is_ours(pid: Option<u32>, recorded_start_time: Option<u64>) -> bool {
+    let Some(pid) = pid else {
+        return false;
+    };
+    if !process_alive(pid as i32) {
+        return false;
+    }
+    match recorded_start_time {
+        Some(token) => process_start_time(pid) == Some(token),
+        None => true,
+    }
+}
+
+/// True if the session is still owned by a live process of ours (supervisor in
+/// direct mode, child in daemon mode). Shared by both start paths so direct and
+/// daemon mode agree on whether a name is in use.
+pub fn session_is_active(metadata: &SessionMetadata) -> bool {
+    metadata.status == SessionStatus::Running
+        && (pid_is_ours(metadata.supervisor_pid, metadata.supervisor_start_time)
+            || pid_is_ours(metadata.child_pid, metadata.child_start_time))
 }
 
 pub fn now_unix() -> u64 {

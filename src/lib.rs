@@ -6,6 +6,7 @@ pub mod doctor;
 pub mod keys;
 pub mod logs;
 pub mod paths;
+pub mod procinfo;
 pub mod protocol;
 pub mod session;
 
