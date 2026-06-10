@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use agent_bridge::{
     daemon::{run_daemon, shutdown_daemon_direct},
     doctor::doctor,
+    paths::resolve_cwd,
     protocol::{try_send_daemon_request, DaemonRequest},
     session::{
         list_sessions, print_status, read_output, read_screen, run_supervisor, send_input,
@@ -117,7 +118,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if !cli.direct {
-        if let Some(request) = daemon_request_for_command(&cli.command) {
+        if let Some(request) = daemon_request_for_command(&cli.command)? {
             if let Some(response) = try_send_daemon_request(&request)? {
                 if response.ok {
                     print!("{}", response.output);
@@ -154,11 +155,13 @@ fn main() -> Result<()> {
     }
 }
 
-fn daemon_request_for_command(command: &Commands) -> Option<DaemonRequest> {
-    match command {
+fn daemon_request_for_command(command: &Commands) -> Result<Option<DaemonRequest>> {
+    let request = match command {
         Commands::Start { name, cwd, cmd } => Some(DaemonRequest::Start {
             name: name.clone(),
-            cwd: cwd.clone(),
+            // Resolve against the client's cwd before the request leaves this
+            // process; the daemon's working directory is unrelated to the user's.
+            cwd: Some(resolve_cwd(cwd.clone())?),
             cmd: cmd.clone(),
         }),
         Commands::Send {
@@ -188,5 +191,6 @@ fn daemon_request_for_command(command: &Commands) -> Option<DaemonRequest> {
         Commands::Stop { name } => Some(DaemonRequest::Stop { name: name.clone() }),
         Commands::Shutdown => Some(DaemonRequest::Shutdown),
         Commands::Daemon | Commands::Doctor { .. } | Commands::Supervisor { .. } => None,
-    }
+    };
+    Ok(request)
 }

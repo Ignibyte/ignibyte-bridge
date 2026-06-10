@@ -13,8 +13,8 @@ use anyhow::{bail, Context, Result};
 
 use crate::{
     paths::{
-        bridge_root, ensure_bridge_dir, ensure_private_dir, session_dir, sessions_root,
-        socket_path, validate_session_name,
+        bridge_root, ensure_bridge_dir, ensure_private_dir, resolve_cwd, session_dir,
+        sessions_root, socket_path, validate_session_name,
     },
     protocol::{try_send_daemon_request, DaemonRequest, DaemonResponse},
     session::{
@@ -136,13 +136,7 @@ fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
 fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Result<SessionMetadata> {
     validate_session_name(name)?;
 
-    let cwd = cwd
-        .unwrap_or(std::env::current_dir().context("failed to read current directory")?)
-        .canonicalize()
-        .context("failed to canonicalize cwd")?;
-    if !cwd.is_dir() {
-        bail!("cwd is not a directory: {}", cwd.display());
-    }
+    let cwd = resolve_cwd(cwd)?;
 
     let session_dir = session_dir(name)?;
     ensure_bridge_dir(&session_dir)?;

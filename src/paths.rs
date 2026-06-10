@@ -150,6 +150,23 @@ pub fn session_dir(name: &str) -> Result<PathBuf> {
     Ok(sessions_root()?.join(name))
 }
 
+/// Resolve a session working directory to a canonical absolute path. Resolving
+/// in the client (before a request is routed to the daemon) keeps `--cwd`
+/// relative to the user's shell rather than the daemon's working directory.
+pub fn resolve_cwd(cwd: Option<PathBuf>) -> Result<PathBuf> {
+    let cwd = match cwd {
+        Some(path) => path,
+        None => std::env::current_dir().context("failed to read current directory")?,
+    };
+    let canonical = cwd
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize cwd {}", cwd.display()))?;
+    if !canonical.is_dir() {
+        bail!("cwd is not a directory: {}", canonical.display());
+    }
+    Ok(canonical)
+}
+
 pub fn parse_command(cmd: &str) -> Result<Vec<String>> {
     let parts = shell_words::split(cmd).context("failed to parse command")?;
     if parts.is_empty() {

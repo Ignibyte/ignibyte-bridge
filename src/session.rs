@@ -28,7 +28,7 @@ use crate::{
     logs::{capture_output, forward_input, tail_lines},
     paths::{
         create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin,
-        resolve_program_path, session_dir, sessions_root, validate_session_name,
+        resolve_cwd, resolve_program_path, session_dir, sessions_root, validate_session_name,
     },
     CLEAN_LOG, INPUT_FIFO, METADATA, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
 };
@@ -67,13 +67,7 @@ pub fn start_session_detached(
 ) -> Result<SessionMetadata> {
     validate_session_name(name)?;
 
-    let cwd = cwd
-        .unwrap_or(std::env::current_dir().context("failed to read current directory")?)
-        .canonicalize()
-        .context("failed to canonicalize cwd")?;
-    if !cwd.is_dir() {
-        bail!("cwd is not a directory: {}", cwd.display());
-    }
+    let cwd = resolve_cwd(cwd)?;
 
     let session_dir = session_dir(name)?;
     ensure_bridge_dir(&session_dir)?;
