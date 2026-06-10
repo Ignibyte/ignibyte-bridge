@@ -198,10 +198,9 @@ fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
         DaemonRequest::Stop { name } => {
             stop_session_silent(&name).map(|()| format!("stopped session '{name}'\n"))
         }
-        DaemonRequest::Shutdown => shutdown_sessions_for_daemon().map(|mut output| {
-            output.push_str("daemon shutting down\n");
-            output
-        }),
+        // Shutdown is handled (reply-first, then terminate + exit) in
+        // handle_daemon_stream before this point and never reaches here.
+        DaemonRequest::Shutdown => unreachable!("shutdown handled in handle_daemon_stream"),
     };
 
     match result {

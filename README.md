@@ -99,12 +99,12 @@ agent-bridge --direct stop  sh
 
 | Command | Purpose |
 | --- | --- |
-| `start <name> --cmd "<cmd>" [--cwd <dir>]` | Start a named PTY session. `--cwd` defaults to the client's current directory. |
+| `start <name> --cmd "<cmd>" [--cwd <dir>] [--rows N] [--cols N]` | Start a named PTY session. `--cwd` defaults to the client's current directory; PTY geometry defaults to 40×140. |
 | `send <name> <text> [--no-enter]` | Send text, with a trailing Enter unless `--no-enter`. |
 | `keys <name> <key>...` | Send control keys: `enter escape ctrl-c ctrl-d ctrl-z tab backspace delete up down left right home end`. |
 | `read <name> [--tail N] [--raw]` | Print the last `N` lines of `clean.log` (or `raw.log` with `--raw`). |
 | `screen <name> [--tail N]` | Print the current rendered terminal screen. |
-| `status <name>` | Show one session's status, pids, and liveness. |
+| `status <name>` | Show one session's status, pids, liveness, geometry, and activity (`idle_seconds`, `output_bytes`). |
 | `list` | List all known sessions. |
 | `stop <name>` | Stop a session (SIGTERM then SIGKILL to its process group). |
 | `daemon` | Run the local daemon (foreground). |
@@ -116,6 +116,11 @@ Global flag: `--direct` bypasses the daemon and runs the command in-process.
 To send text that begins with a dash, it's forwarded as-is
 (`agent-bridge send py "-1 + 2"`); to send a literal flag like `--help`, use the
 `--` separator: `agent-bridge send py -- --help`.
+
+To tell whether a session is still working or waiting for input, poll `status`
+and watch `idle_seconds` — it counts seconds since the session last produced
+output, so a value that stops climbing means the program has gone quiet (e.g.
+Claude has finished responding). `list` shows the same as an `idle=` column.
 
 ## Storage layout
 
