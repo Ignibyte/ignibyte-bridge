@@ -4,6 +4,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     os::unix::fs::OpenOptionsExt,
+    os::unix::io::FromRawFd,
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -431,18 +432,32 @@ pub fn supervise_pty(
             save_metadata(&metadata)?;
         }
 
-        let mut output_reader = master
-            .try_clone_reader()
-            .context("failed to clone PTY reader")?;
+        // Own a dup of the master fd for the capture thread so it can be polled
+        // (and thus stopped + joined) rather than blocked forever on read.
+        let master_fd = master
+            .as_raw_fd()
+            .context("PTY master has no file descriptor")?;
+        // SAFETY: master_fd is a valid open descriptor; dup returns a new owned
+        // descriptor that File takes ownership of below.
+        let reader_fd = unsafe { libc::dup(master_fd) };
+        if reader_fd < 0 {
+            return Err(std::io::Error::last_os_error()).context("failed to dup PTY master");
+        }
+        // SAFETY: reader_fd is freshly dup'd and owned exclusively by this File.
+        let mut output_reader = unsafe { std::fs::File::from_raw_fd(reader_fd) };
         let mut input_writer = master.take_writer().context("failed to take PTY writer")?;
 
+        let output_stop = Arc::new(AtomicBool::new(false));
         let output_dir = session_dir.clone();
-        let output_thread = thread::spawn(move || capture_output(&mut output_reader, &output_dir));
+        let capture_stop = Arc::clone(&output_stop);
+        let output_thread = thread::spawn(move || {
+            capture_output(&mut output_reader, &output_dir, &capture_stop)
+        });
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let input_stop = Arc::clone(&stop);
+        let input_stop = Arc::new(AtomicBool::new(false));
+        let forward_stop = Arc::clone(&input_stop);
         let input_thread =
-            thread::spawn(move || forward_input(input_fifo, &mut input_writer, &input_stop));
+            thread::spawn(move || forward_input(input_fifo, &mut input_writer, &forward_stop));
 
         let exit_status = child.wait().context("failed while waiting for child")?;
         let exit_code = Some(exit_status.exit_code());
@@ -450,18 +465,20 @@ pub fn supervise_pty(
         // Stop and join the input forwarder so its thread, FIFO fd, and dup'd
         // PTY master writer are released instead of leaking for the daemon's
         // lifetime.
-        stop.store(true, Ordering::Relaxed);
+        input_stop.store(true, Ordering::Relaxed);
         let _ = input_thread.join();
         drop(master);
 
         // Drain remaining output, but cap the wait: backgrounded grandchildren
-        // can hold the PTY slave open so the reader never sees EOF. Returning
-        // anyway lets the caller mark the session Stopped instead of blocking
-        // forever.
+        // can hold the PTY slave open so the reader never sees EOF. After the
+        // cap, signal the capture thread to stop and join it unconditionally so
+        // it (and its dup'd master fd) is never leaked.
         let deadline = Instant::now() + Duration::from_secs(2);
         while !output_thread.is_finished() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(20));
         }
+        output_stop.store(true, Ordering::Relaxed);
+        let _ = output_thread.join();
 
         Ok((format!("{exit_status:?}"), exit_code))
     })();

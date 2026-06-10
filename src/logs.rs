@@ -4,6 +4,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
+    os::unix::io::AsRawFd,
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -20,7 +21,12 @@ use crate::{
     SCREEN_SNAPSHOT,
 };
 
-pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> Result<()> {
+/// Capture PTY output into the raw/clean logs and the screen snapshot until the
+/// reader reaches EOF or `stop` is set. `reader` owns a dup of the PTY master
+/// fd; a `poll` with a short timeout lets the loop observe `stop` even when a
+/// backgrounded grandchild holds the slave open and no EOF ever arrives, so the
+/// owning thread can always be joined instead of leaking.
+pub fn capture_output(reader: &mut File, session_dir: &Path, stop: &Arc<AtomicBool>) -> Result<()> {
     let mut raw_log = OpenOptions::new()
         .create(true)
         .append(true)
@@ -42,6 +48,30 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
     let mut warned = [false; 3];
 
     loop {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        // Wait for data with a timeout so the stop flag is observed even if the
+        // reader never reaches EOF.
+        let mut pfd = libc::pollfd {
+            fd: reader.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: pfd points to one valid pollfd; poll only reads/writes it.
+        let rc = unsafe { libc::poll(&mut pfd, 1, 200) };
+        if rc < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error).context("failed to poll PTY");
+        }
+        if rc == 0 {
+            continue; // timeout: re-check stop
+        }
+
         // A read error (not EOF) is fatal: without a draining reader the child
         // would block on the PTY forever, so propagate and let the session stop.
         let read = reader.read(&mut buffer).context("failed to read PTY")?;
