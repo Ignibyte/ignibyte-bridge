@@ -81,6 +81,11 @@ pub enum SessionStatus {
     Stopped,
 }
 
+/// Gap between the text and the Enter keystroke in `send`, so the carriage
+/// return reaches the PTY as its own read (a submit), not as a newline appended
+/// to pasted text. Comfortably above the input forwarder's 20ms poll.
+const SEND_ENTER_DELAY_MS: u64 = 60;
+
 fn default_rows() -> u16 {
     SCREEN_ROWS
 }
@@ -533,12 +538,18 @@ pub fn send_input(name: &str, text: &str, no_enter: bool) -> Result<()> {
 }
 
 pub fn send_input_silent(name: &str, text: &str, no_enter: bool) -> Result<()> {
-    let mut bytes = text.as_bytes().to_vec();
+    write_session_bytes(name, text.as_bytes())?;
+
     if !no_enter {
-        bytes.push(b'\r');
+        // Deliver Enter as a separate write after a short gap so the PTY reader
+        // sees it on its own. Interactive TUIs such as Claude Code treat a
+        // carriage return arriving in the same chunk as the text as a newline
+        // within pasted input (not a submit); a lone CR is an Enter keystroke.
+        thread::sleep(Duration::from_millis(SEND_ENTER_DELAY_MS));
+        write_session_bytes(name, b"\r")?;
     }
 
-    write_session_bytes(name, &bytes)
+    Ok(())
 }
 
 pub fn send_keys(name: &str, keys: &[String]) -> Result<()> {
