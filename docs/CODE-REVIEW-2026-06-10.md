@@ -3,6 +3,7 @@
 - **Date:** 2026-06-10
 - **Baseline:** commit `d230009` (`src/main.rs`, 1,321 lines, as written by Codex). All line references are against this commit.
 - **Verdict counts:** 0 critical, 3 high, 19 medium, 13 low — 35 confirmed, 1 refuted, 0 uncertain.
+- **Follow-up:** the fixes themselves were then adversarially re-reviewed — see [`CODE-REVIEW-2026-06-10-fixes.md`](CODE-REVIEW-2026-06-10-fixes.md) (10 further findings, all fixed).
 
 ## Methodology
 

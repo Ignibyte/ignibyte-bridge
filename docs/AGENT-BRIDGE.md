@@ -57,7 +57,8 @@ Implemented:
   version comparisons.
 
 Hardening added after the 2026-06-10 adversarial review (see
-`CODE-REVIEW-2026-06-10.md`): owner-only permissions on all session artifacts;
+`CODE-REVIEW-2026-06-10.md`, and the follow-up re-review of the fixes in
+`CODE-REVIEW-2026-06-10-fixes.md`): owner-only permissions on all session artifacts;
 atomic metadata/screen writes; client-side `--cwd` and `PATH` resolution for
 daemon sessions; bounded, non-UTF-8-safe `read`; a stateful ANSI cleaner that
 preserves tabs and survives chunk boundaries; per-session start locks and a
