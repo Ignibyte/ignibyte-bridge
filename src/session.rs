@@ -90,13 +90,17 @@ pub fn start_session_detached(
 
     let current_exe = std::env::current_exe().context("failed to locate current executable")?;
     let mut supervisor = Command::new(current_exe);
+    // Pass the session name last, behind `--`, so it is always treated as a
+    // positional argument even if it begins with characters clap would read as
+    // a flag (defense in depth alongside validate_session_name).
     supervisor
         .arg("supervisor")
-        .arg(name)
         .arg("--cwd")
         .arg(&cwd)
         .arg("--cmd")
         .arg(cmd)
+        .arg("--")
+        .arg(name)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

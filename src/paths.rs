@@ -15,12 +15,25 @@ pub fn validate_session_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("session name cannot be empty");
     }
+    if name.len() > 128 {
+        bail!("session name must be 128 characters or fewer");
+    }
 
     let valid = name
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
     if !valid {
         bail!("session name may only contain letters, numbers, '.', '-', and '_'");
+    }
+
+    // '.' and '..' escape the per-session directory (session_dir("..") is the
+    // bridge root itself); a leading '-' is parsed as a flag when the name is
+    // passed to the supervisor's argv.
+    if name == "." || name == ".." {
+        bail!("session name may not be '.' or '..'");
+    }
+    if name.starts_with('-') {
+        bail!("session name may not start with '-'");
     }
 
     Ok(())
