@@ -15,7 +15,9 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::{CLEAN_LOG, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT};
+use crate::{
+    paths::write_atomic, CLEAN_LOG, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
+};
 
 pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> Result<()> {
     let mut raw_log = OpenOptions::new()
@@ -52,9 +54,9 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
         clean_log.flush().context("failed to flush clean log")?;
 
         terminal.process(chunk);
-        std::fs::write(
-            session_dir.join(SCREEN_SNAPSHOT),
-            trim_screen_snapshot(&terminal.screen().contents()),
+        write_atomic(
+            &session_dir.join(SCREEN_SNAPSHOT),
+            trim_screen_snapshot(&terminal.screen().contents()).as_bytes(),
         )
         .context("failed to write screen snapshot")?;
     }

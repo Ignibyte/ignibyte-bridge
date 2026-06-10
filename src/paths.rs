@@ -5,6 +5,7 @@ use std::{
     fs,
     os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -112,6 +113,47 @@ pub fn ensure_bridge_dir(dir: &Path) -> Result<()> {
     for component in relative.components() {
         current = current.join(component);
         ensure_private_dir(&current)?;
+    }
+
+    Ok(())
+}
+
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `contents` to `path` atomically: a private temp file in the same
+/// directory is written then `rename`d over the destination. Concurrent
+/// readers always observe either the complete old or the complete new file,
+/// never a truncated one, even if the writer is killed mid-write.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
+    use std::io::Write;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("path has no parent directory: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("path has no file name: {}", path.display()))?;
+    let unique = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!(".{file_name}.tmp.{}.{unique}", std::process::id()));
+
+    let write_result = (|| -> Result<()> {
+        let mut file = create_private_file(&tmp)?;
+        file.write_all(contents)
+            .with_context(|| format!("failed to write {}", tmp.display()))?;
+        file.flush()
+            .with_context(|| format!("failed to flush {}", tmp.display()))?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error)
+            .with_context(|| format!("failed to replace {}", path.display()));
     }
 
     Ok(())

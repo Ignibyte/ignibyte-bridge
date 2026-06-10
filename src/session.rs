@@ -31,8 +31,8 @@ use crate::{
     keys::encode_key,
     logs::{capture_output, forward_input, tail_lines},
     paths::{
-        create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin,
-        resolve_cwd, resolve_program_path, session_dir, sessions_root, validate_session_name,
+        create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin, resolve_cwd,
+        resolve_program_path, session_dir, sessions_root, validate_session_name, write_atomic,
     },
     CLEAN_LOG, INPUT_FIFO, METADATA, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
 };
@@ -541,10 +541,7 @@ pub fn save_metadata(metadata: &SessionMetadata) -> Result<()> {
     let mut next = metadata.clone();
     next.updated_at_unix = now_unix();
     let contents = serde_json::to_string_pretty(&next).context("failed to serialize metadata")?;
-    let mut file = create_private_file(&path)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .with_context(|| format!("failed to write {}", path.display()))
+    write_atomic(&path, contents.as_bytes())
 }
 
 pub fn process_alive(pid: i32) -> bool {
