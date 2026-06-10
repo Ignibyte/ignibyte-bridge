@@ -2,7 +2,8 @@
 
 use std::{
     ffi::OsString,
-    os::unix::fs::PermissionsExt,
+    fs,
+    os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -38,11 +39,110 @@ pub fn bridge_root() -> Result<PathBuf> {
 
 pub fn bridge_root_from(override_root: Option<OsString>) -> Result<PathBuf> {
     if let Some(root) = override_root {
-        return Ok(PathBuf::from(root));
+        let root = PathBuf::from(root);
+        if !root.is_absolute() {
+            bail!(
+                "AGENT_BRIDGE_HOME must be an absolute path, got {}",
+                root.display()
+            );
+        }
+        return Ok(root);
     }
 
     let base_dirs = BaseDirs::new().ok_or_else(|| anyhow!("failed to locate home directory"))?;
     Ok(base_dirs.home_dir().join(".agent-bridge"))
+}
+
+/// Create `path` (and missing parents) as a private directory and verify it is
+/// safe to use: a real directory (not a symlink someone planted), owned by the
+/// current user, with owner-only permissions. The post-creation verification
+/// closes pre-creation/symlink races in shared locations like /tmp.
+pub fn ensure_private_dir(path: &Path) -> Result<()> {
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "refusing to use {}: it is a symlink (possible tampering)",
+            path.display()
+        );
+    }
+    if !metadata.is_dir() {
+        bail!("refusing to use {}: not a directory", path.display());
+    }
+    // SAFETY: geteuid has no failure modes or memory effects.
+    let euid = unsafe { libc::geteuid() };
+    if metadata.uid() != euid {
+        bail!(
+            "refusing to use {}: owned by uid {} instead of current uid {}",
+            path.display(),
+            metadata.uid(),
+            euid
+        );
+    }
+    if metadata.permissions().mode() & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to restrict permissions on {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+/// Validate and privately create the bridge root, then `dir`, validating every
+/// intermediate component down from the root. Catches a symlinked or
+/// foreign-owned component anywhere in the chain, not just the leaf.
+pub fn ensure_bridge_dir(dir: &Path) -> Result<()> {
+    let root = bridge_root()?;
+    ensure_private_dir(&root)?;
+
+    let relative = dir.strip_prefix(&root).with_context(|| {
+        format!(
+            "{} is not inside the bridge root {}",
+            dir.display(),
+            root.display()
+        )
+    })?;
+
+    let mut current = root;
+    for component in relative.components() {
+        current = current.join(component);
+        ensure_private_dir(&current)?;
+    }
+
+    Ok(())
+}
+
+/// Create (or truncate) a file readable and writable only by the owner,
+/// repairing the mode if the file already exists with looser permissions.
+/// `O_NOFOLLOW` rejects a planted symlink in place of the file.
+pub fn create_private_file(path: &Path) -> Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+
+    let mode = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .permissions()
+        .mode();
+    if mode & 0o077 != 0 {
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to restrict permissions on {}", path.display()))?;
+    }
+
+    Ok(file)
 }
 
 pub fn session_dir(name: &str) -> Result<PathBuf> {

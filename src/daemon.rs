@@ -12,7 +12,10 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use crate::{
-    paths::{bridge_root, session_dir, sessions_root, socket_path, validate_session_name},
+    paths::{
+        bridge_root, ensure_bridge_dir, ensure_private_dir, session_dir, sessions_root,
+        socket_path, validate_session_name,
+    },
     protocol::{try_send_daemon_request, DaemonRequest, DaemonResponse},
     session::{
         format_started_session, initialize_session_files, list_sessions_text, load_metadata,
@@ -24,7 +27,7 @@ use crate::{
 
 pub fn run_daemon() -> Result<()> {
     let root = bridge_root()?;
-    fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
+    ensure_private_dir(&root)?;
 
     let path = socket_path()?;
     if path.exists() {
@@ -142,8 +145,7 @@ fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Resul
     }
 
     let session_dir = session_dir(name)?;
-    fs::create_dir_all(&session_dir)
-        .with_context(|| format!("failed to create {}", session_dir.display()))?;
+    ensure_bridge_dir(&session_dir)?;
 
     if let Ok(metadata) = load_metadata(name) {
         if metadata.status == SessionStatus::Running

@@ -1,7 +1,7 @@
 //! Session lifecycle: start/stop/status/list, metadata, and the PTY supervisor.
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     os::unix::fs::OpenOptionsExt,
     os::unix::process::CommandExt,
@@ -27,8 +27,8 @@ use crate::{
     keys::encode_key,
     logs::{capture_output, forward_input, tail_lines},
     paths::{
-        parse_command, path_with_local_bin, resolve_program_path, session_dir, sessions_root,
-        validate_session_name,
+        create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin,
+        resolve_program_path, session_dir, sessions_root, validate_session_name,
     },
     CLEAN_LOG, INPUT_FIFO, METADATA, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
 };
@@ -76,8 +76,7 @@ pub fn start_session_detached(
     }
 
     let session_dir = session_dir(name)?;
-    fs::create_dir_all(&session_dir)
-        .with_context(|| format!("failed to create {}", session_dir.display()))?;
+    ensure_bridge_dir(&session_dir)?;
 
     if let Ok(metadata) = load_metadata(name) {
         if metadata.status == SessionStatus::Running
@@ -145,9 +144,9 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
     mkfifo(&input, Mode::from_bits_truncate(0o600))
         .with_context(|| format!("failed to create {}", input.display()))?;
 
-    File::create(dir.join(RAW_LOG)).context("failed to create raw log")?;
-    File::create(dir.join(CLEAN_LOG)).context("failed to create clean log")?;
-    File::create(dir.join(SCREEN_SNAPSHOT)).context("failed to create screen snapshot")?;
+    create_private_file(&dir.join(RAW_LOG)).context("failed to create raw log")?;
+    create_private_file(&dir.join(CLEAN_LOG)).context("failed to create clean log")?;
+    create_private_file(&dir.join(SCREEN_SNAPSHOT)).context("failed to create screen snapshot")?;
 
     let metadata = SessionMetadata {
         name: name.to_string(),
@@ -390,8 +389,7 @@ pub fn list_sessions() -> Result<()> {
 
 pub fn list_sessions_text() -> Result<String> {
     let sessions_dir = sessions_root()?;
-    fs::create_dir_all(&sessions_dir)
-        .with_context(|| format!("failed to create {}", sessions_dir.display()))?;
+    ensure_bridge_dir(&sessions_dir)?;
 
     let mut sessions = Vec::new();
     for entry in fs::read_dir(&sessions_dir)
@@ -531,7 +529,10 @@ pub fn save_metadata(metadata: &SessionMetadata) -> Result<()> {
     let mut next = metadata.clone();
     next.updated_at_unix = now_unix();
     let contents = serde_json::to_string_pretty(&next).context("failed to serialize metadata")?;
-    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+    let mut file = create_private_file(&path)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 pub fn process_alive(pid: i32) -> bool {

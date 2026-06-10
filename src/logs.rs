@@ -3,6 +3,7 @@
 use std::{
     fs::OpenOptions,
     io::{Read, Write},
+    os::unix::fs::OpenOptionsExt,
     path::Path,
     thread,
     time::Duration,
@@ -16,11 +17,13 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
     let mut raw_log = OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(session_dir.join(RAW_LOG))
         .context("failed to open raw log")?;
     let mut clean_log = OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(session_dir.join(CLEAN_LOG))
         .context("failed to open clean log")?;
     let mut terminal = vt100::Parser::new(SCREEN_ROWS, SCREEN_COLS, 2_000);
