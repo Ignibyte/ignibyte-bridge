@@ -7,8 +7,12 @@ use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{bail, Context, Result};
@@ -248,13 +252,27 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
     let output_dir = session_dir.clone();
     let output_thread = thread::spawn(move || capture_output(&mut output_reader, &output_dir));
 
+    let stop = Arc::new(AtomicBool::new(false));
     let input_fifo = session_dir.join(INPUT_FIFO);
-    let _input_thread = thread::spawn(move || forward_input(&input_fifo, &mut input_writer));
+    let input_stop = Arc::clone(&stop);
+    let input_thread =
+        thread::spawn(move || forward_input(&input_fifo, &mut input_writer, &input_stop));
 
     let exit_status = child.wait().context("failed while waiting for child")?;
 
+    // Stop and join the input forwarder so its thread, FIFO fd, and dup'd PTY
+    // master writer are released instead of leaking for the daemon's lifetime.
+    stop.store(true, Ordering::Relaxed);
+    let _ = input_thread.join();
     drop(pair.master);
-    let _ = output_thread.join();
+
+    // Drain remaining output, but cap the wait: backgrounded grandchildren can
+    // hold the PTY slave open so the reader never sees EOF. Returning anyway
+    // lets the caller mark the session Stopped instead of blocking forever.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !output_thread.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
 
     Ok(format!("{exit_status:?}"))
 }

@@ -5,6 +5,10 @@ use std::{
     io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
     path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::Duration,
 };
@@ -56,26 +60,42 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
     }
 }
 
-pub fn forward_input(input_fifo: &Path, writer: &mut Box<dyn Write + Send>) -> Result<()> {
+/// Forward bytes from the session FIFO to the PTY until `stop` is set.
+///
+/// The FIFO is opened read+write so the reader always holds a write end and
+/// never sees EOF when senders disconnect, and `O_NONBLOCK` lets the loop wake
+/// periodically to observe `stop` — so the owner can join this thread when the
+/// child exits instead of leaking it (and the dup'd PTY master fd it holds).
+pub fn forward_input(
+    input_fifo: &Path,
+    writer: &mut Box<dyn Write + Send>,
+    stop: &Arc<AtomicBool>,
+) -> Result<()> {
     let mut fifo = OpenOptions::new()
         .read(true)
         .write(true)
+        .custom_flags(libc::O_NONBLOCK)
         .open(input_fifo)
         .with_context(|| format!("failed to open {}", input_fifo.display()))?;
     let mut buffer = [0_u8; 8192];
 
     loop {
-        let read = fifo
-            .read(&mut buffer)
-            .context("failed to read input FIFO")?;
-        if read == 0 {
-            thread::sleep(Duration::from_millis(20));
-            continue;
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
         }
-        writer
-            .write_all(&buffer[..read])
-            .context("failed to write input to PTY")?;
-        writer.flush().context("failed to flush PTY input")?;
+        match fifo.read(&mut buffer) {
+            Ok(0) => thread::sleep(Duration::from_millis(20)),
+            Ok(read) => {
+                writer
+                    .write_all(&buffer[..read])
+                    .context("failed to write input to PTY")?;
+                writer.flush().context("failed to flush PTY input")?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error).context("failed to read input FIFO"),
+        }
     }
 }
 
