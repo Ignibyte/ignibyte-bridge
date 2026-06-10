@@ -53,6 +53,11 @@ pub struct SessionMetadata {
     /// Start-time token for the child PID.
     #[serde(default)]
     pub child_start_time: Option<u64>,
+    /// Monotonically increasing per-start counter. A restart reuses the session
+    /// name but bumps this, so a stale supervisor from an earlier run cannot
+    /// clobber the terminal state of a newer run (see [`mark_stopped`]).
+    #[serde(default)]
+    pub generation: u64,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub exit_status: Option<String>,
@@ -186,12 +191,20 @@ pub fn acquire_start_lock(session_dir: &Path, name: &str) -> Result<fs::File> {
     Ok(lock)
 }
 
-pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
+/// Initialize a session's files and metadata for a new run, returning the run's
+/// generation number (used by the supervisor to detect a later restart).
+pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<u64> {
     let dir = session_dir(name)?;
 
     // Parse the command before destroying any prior logs, so a start that fails
     // to parse does not wipe a previous session's transcript.
     let command = parse_command(cmd)?;
+
+    // Each run bumps the generation so a stale supervisor cannot mark a newer
+    // run Stopped.
+    let generation = load_metadata(name)
+        .map(|prev| prev.generation.wrapping_add(1))
+        .unwrap_or(1);
 
     let input = dir.join(INPUT_FIFO);
     if input.exists() {
@@ -217,12 +230,14 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
         child_pid: None,
         supervisor_start_time: None,
         child_start_time: None,
+        generation,
         created_at_unix: now_unix(),
         updated_at_unix: now_unix(),
         exit_status: None,
         exit_code: None,
     };
-    save_metadata(&metadata)
+    save_metadata(&metadata)?;
+    Ok(generation)
 }
 
 /// Preserve a non-empty log as a single `.prev` generation before it is
@@ -264,35 +279,60 @@ pub fn wait_for_running_metadata(name: &str) -> Result<SessionMetadata> {
         }
     }
 
-    // Timed out still in Starting: converge to a clean Stopped state rather than
-    // reporting failure while an in-flight supervisor keeps running behind us.
+    // Timed out. Converge without disturbing a session that raced into a good
+    // state at the boundary: only act if it is still Starting, and only signal
+    // a PID we can positively identify as ours (never a recycled one).
     if let Ok(metadata) = load_metadata(name) {
-        if let Some(pid) = metadata.supervisor_pid {
-            let _ = terminate_pid(pid as i32);
-        }
-        if let Some(pid) = metadata.child_pid {
-            let _ = terminate_pid(pid as i32);
+        match metadata.status {
+            SessionStatus::Running => return Ok(metadata),
+            SessionStatus::Stopped if metadata.exit_code == Some(0) => return Ok(metadata),
+            SessionStatus::Stopped => bail!(
+                "session '{}' stopped while starting: {}",
+                name,
+                metadata
+                    .exit_status
+                    .unwrap_or_else(|| "unknown failure".to_string())
+            ),
+            SessionStatus::Starting => {
+                if pid_is_ours(metadata.supervisor_pid, metadata.supervisor_start_time) {
+                    let _ = terminate_pid(metadata.supervisor_pid.unwrap() as i32);
+                }
+                if pid_is_ours(metadata.child_pid, metadata.child_start_time) {
+                    let _ = terminate_pid(metadata.child_pid.unwrap() as i32);
+                }
+                let _ = mark_stopped(
+                    name,
+                    Some("start timed out".to_string()),
+                    None,
+                    Some(metadata.generation),
+                );
+            }
         }
     }
-    let _ = mark_stopped(name, Some("start timed out".to_string()), None);
     bail!("session '{name}' did not report running within 5 seconds");
 }
 
 pub fn run_supervisor(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     validate_session_name(name)?;
 
-    let mut metadata = load_metadata(name)?;
-    let supervisor_pid = std::process::id();
-    metadata.supervisor_pid = Some(supervisor_pid);
-    metadata.supervisor_start_time = process_start_time(supervisor_pid);
-    metadata.updated_at_unix = now_unix();
-    save_metadata(&metadata)?;
+    let generation = {
+        let _status_lock = acquire_status_lock(&session_dir(name)?)?;
+        let mut metadata = load_metadata(name)?;
+        let supervisor_pid = std::process::id();
+        metadata.supervisor_pid = Some(supervisor_pid);
+        metadata.supervisor_start_time = process_start_time(supervisor_pid);
+        metadata.updated_at_unix = now_unix();
+        save_metadata(&metadata)?;
+        metadata.generation
+    };
 
     // Direct mode: the supervisor process inherited the client's environment,
     // so its own PATH is already the user's.
-    match supervise_pty(name, cwd, cmd, None) {
-        Ok((exit_status, exit_code)) => mark_stopped(name, Some(exit_status), exit_code),
-        Err(error) => mark_stopped(name, Some(error.to_string()), None),
+    match supervise_pty(name, cwd, cmd, None, generation) {
+        Ok((exit_status, exit_code)) => {
+            mark_stopped(name, Some(exit_status), exit_code, Some(generation))
+        }
+        Err(error) => mark_stopped(name, Some(error.to_string()), None, Some(generation)),
     }
 }
 
@@ -301,6 +341,7 @@ pub fn supervise_pty(
     cwd: &Path,
     cmd: &str,
     client_path: Option<&str>,
+    generation: u64,
 ) -> Result<(String, Option<u32>)> {
     let mut command_parts = parse_command(cmd)?;
     let path = child_path(client_path);
@@ -341,6 +382,31 @@ pub fn supervise_pty(
 
     let master = pair.master;
     let outcome = (|| -> Result<(String, Option<u32>)> {
+        // Record the child PID (paired with its start-time token) as early as
+        // possible, while still Starting, so a concurrent stop/shutdown can
+        // identify and signal the child instead of orphaning it. Pair the PID
+        // with its token: if the token can't be read the child has already
+        // exited, so drop the PID rather than leave it unguarded by identity.
+        {
+            let _status_lock = acquire_status_lock(&session_dir)?;
+            let mut metadata = load_metadata(name)?;
+            check_run_live(&metadata, generation, name)?;
+            let child_pid = child.process_id();
+            match child_pid.and_then(process_start_time) {
+                Some(token) => {
+                    metadata.child_pid = child_pid;
+                    metadata.child_start_time = Some(token);
+                }
+                None => {
+                    metadata.child_pid = None;
+                    metadata.child_start_time = None;
+                }
+            }
+            metadata.command = command_parts;
+            metadata.updated_at_unix = now_unix();
+            save_metadata(&metadata)?;
+        }
+
         // Open the FIFO reader before publishing the session as Running, so a
         // send that races the start always finds a reader (no ENXIO window).
         // O_RDWR keeps a write end open so the read side never sees EOF;
@@ -353,19 +419,17 @@ pub fn supervise_pty(
             .open(&input_fifo_path)
             .with_context(|| format!("failed to open {}", input_fifo_path.display()))?;
 
-        let mut metadata = load_metadata(name)?;
-        // A stop that landed during startup marked the session Stopped before
-        // any PID was recorded. Honor it instead of resurrecting the session by
-        // promoting it to Running (the child is reaped by the outer guard).
-        if metadata.status == SessionStatus::Stopped {
-            bail!("session '{name}' was stopped during startup");
+        // Promote to Running under the status lock, re-checking that a stop or
+        // restart did not intervene during startup; otherwise honor it (the
+        // child is reaped by the outer guard).
+        {
+            let _status_lock = acquire_status_lock(&session_dir)?;
+            let mut metadata = load_metadata(name)?;
+            check_run_live(&metadata, generation, name)?;
+            metadata.status = SessionStatus::Running;
+            metadata.updated_at_unix = now_unix();
+            save_metadata(&metadata)?;
         }
-        metadata.command = command_parts;
-        metadata.status = SessionStatus::Running;
-        metadata.child_pid = child.process_id();
-        metadata.child_start_time = child.process_id().and_then(process_start_time);
-        metadata.updated_at_unix = now_unix();
-        save_metadata(&metadata)?;
 
         let mut output_reader = master
             .try_clone_reader()
@@ -633,7 +697,16 @@ pub fn stop_session_silent(name: &str) -> Result<()> {
         bail!("failed to stop session '{}': {}", name, errors.join("; "));
     }
 
-    mark_stopped(name, Some("stopped by user".to_string()), None)?;
+    // Generation-guarded: if a restart superseded this run between our read and
+    // here, do not mark the newer run Stopped. The supervisor's promote-to-
+    // Running re-checks status under the same lock, so it cannot resurrect a
+    // session we mark Stopped first.
+    mark_stopped(
+        name,
+        Some("stopped by user".to_string()),
+        None,
+        Some(metadata.generation),
+    )?;
 
     Ok(())
 }
@@ -686,8 +759,61 @@ pub fn signal_pid_and_group(pid: i32, signal: Signal) -> Result<bool> {
     Ok(sent)
 }
 
-pub fn mark_stopped(name: &str, exit_status: Option<String>, exit_code: Option<u32>) -> Result<()> {
+/// Acquire a blocking exclusive lock that serializes session status transitions
+/// (promote-to-Running in the supervisor, and mark-Stopped from the supervisor,
+/// `stop`, or a start timeout). Distinct from the start lock — the start handler
+/// holds that one (non-blocking) across the whole startup, so the supervisor
+/// must use a separate lock it can actually acquire while a start is in flight.
+/// Bail if this supervisor's run was stopped during startup or superseded by a
+/// later restart (a newer generation), so it neither resurrects a stopped
+/// session nor hijacks a newer run. Call under the status lock.
+fn check_run_live(metadata: &SessionMetadata, generation: u64, name: &str) -> Result<()> {
+    if metadata.generation != generation {
+        bail!("session '{name}' was superseded by a newer start");
+    }
+    if metadata.status == SessionStatus::Stopped {
+        bail!("session '{name}' was stopped during startup");
+    }
+    Ok(())
+}
+
+fn acquire_status_lock(session_dir: &Path) -> Result<fs::File> {
+    use std::os::unix::io::AsRawFd;
+
+    let lock = create_private_file(&session_dir.join("status.lock"))
+        .context("failed to open session status lock")?;
+    // SAFETY: the fd is valid and owned by `lock` for the duration of the call.
+    let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error()).context("failed to lock session status");
+    }
+    Ok(lock)
+}
+
+/// Transition a session to Stopped under the status lock.
+///
+/// `generation` guards against a stale supervisor from an earlier run clobbering
+/// a newer run of the same name: when `Some(g)`, the write is skipped unless the
+/// on-disk generation still equals `g`. An already-Stopped session keeps its
+/// first-recorded exit info (first writer wins).
+pub fn mark_stopped(
+    name: &str,
+    exit_status: Option<String>,
+    exit_code: Option<u32>,
+    generation: Option<u64>,
+) -> Result<()> {
+    let dir = session_dir(name)?;
+    let _status_lock = acquire_status_lock(&dir)?;
+
     let mut metadata = load_metadata(name)?;
+    if let Some(generation) = generation {
+        if metadata.generation != generation {
+            return Ok(());
+        }
+    }
+    if metadata.status == SessionStatus::Stopped {
+        return Ok(());
+    }
     metadata.status = SessionStatus::Stopped;
     metadata.updated_at_unix = now_unix();
     metadata.exit_status = exit_status;
@@ -772,6 +898,7 @@ mod tests {
             child_pid: Some(124),
             supervisor_start_time: Some(42),
             child_start_time: Some(43),
+            generation: 1,
             created_at_unix: 1000,
             updated_at_unix: 1001,
             exit_status: None,

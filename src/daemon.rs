@@ -228,19 +228,26 @@ fn start_session_in_daemon(
         }
     }
 
-    initialize_session_files(name, &cwd, cmd)?;
+    let generation = initialize_session_files(name, &cwd, cmd)?;
 
     let thread_name = name.to_string();
     let thread_cwd = cwd;
     let thread_cmd = cmd.to_string();
     thread::spawn(move || {
-        let (exit_status, exit_code) =
-            match supervise_pty(&thread_name, &thread_cwd, &thread_cmd, client_path.as_deref()) {
-                Ok((exit_status, exit_code)) => (exit_status, exit_code),
-                Err(error) => (error.to_string(), None),
-            };
+        let (exit_status, exit_code) = match supervise_pty(
+            &thread_name,
+            &thread_cwd,
+            &thread_cmd,
+            client_path.as_deref(),
+            generation,
+        ) {
+            Ok((exit_status, exit_code)) => (exit_status, exit_code),
+            Err(error) => (error.to_string(), None),
+        };
 
-        if let Err(error) = mark_stopped(&thread_name, Some(exit_status), exit_code) {
+        if let Err(error) =
+            mark_stopped(&thread_name, Some(exit_status), exit_code, Some(generation))
+        {
             eprintln!("failed to mark session '{thread_name}' stopped: {error:#}");
         }
     });

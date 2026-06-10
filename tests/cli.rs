@@ -161,6 +161,37 @@ fn large_send_is_delivered_fully() {
 }
 
 #[test]
+fn restart_bumps_generation_and_preserves_prior_logs() {
+    let home = TestHome::new();
+    let _guard = SessionGuard::new(&home, "re");
+
+    let gen = |home: &TestHome| -> u64 {
+        let text =
+            std::fs::read_to_string(home.session_dir("re").join("metadata.json")).unwrap();
+        let needle = "\"generation\":";
+        let start = text.find(needle).unwrap() + needle.len();
+        let rest = text[start..].trim_start();
+        let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
+        rest[..end].trim().parse().unwrap()
+    };
+
+    home.direct().args(["start", "re", "--cmd", "cat"]).assert().success();
+    home.direct().args(["send", "re", "first-run"]).assert().success();
+    assert!(read_contains(&home, "re", "first-run"));
+    assert_eq!(gen(&home), 1);
+    home.direct().args(["stop", "re"]).assert().success();
+    assert!(wait_until(Duration::from_secs(5), || home.status_field("re") == "Stopped"));
+
+    // Restart the same name: generation bumps, prior logs are kept as .prev, and
+    // the new run works.
+    home.direct().args(["start", "re", "--cmd", "cat"]).assert().success();
+    assert_eq!(gen(&home), 2);
+    assert!(home.session_dir("re").join("raw.log.prev").exists());
+    home.direct().args(["send", "re", "second-run"]).assert().success();
+    assert!(read_contains(&home, "re", "second-run"));
+}
+
+#[test]
 fn duplicate_start_is_rejected() {
     let home = TestHome::new();
     let _guard = SessionGuard::new(&home, "dupe");
