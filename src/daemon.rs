@@ -133,11 +133,19 @@ fn handle_daemon_stream(mut stream: UnixStream) -> Result<()> {
         }
     };
 
-    let shutdown_requested = matches!(request, DaemonRequest::Shutdown);
-    let response = handle_daemon_request(request);
-    write_daemon_response(&mut stream, &response)?;
-
-    if shutdown_requested && response.ok {
+    if matches!(request, DaemonRequest::Shutdown) {
+        // Acknowledge first, then stop sessions, so the client is never held for
+        // the (potentially multi-second, serial) per-session termination and
+        // never times out waiting for the ack.
+        let response = DaemonResponse {
+            ok: true,
+            output: "daemon shutting down\n".to_string(),
+            error: None,
+        };
+        write_daemon_response(&mut stream, &response)?;
+        if let Err(error) = shutdown_sessions_for_daemon() {
+            eprintln!("daemon shutdown: {error:#}");
+        }
         // Remove the socket so a clean restart does not depend on the
         // stale-socket cleanup path. The daemon lock releases on exit.
         if let Ok(path) = socket_path() {
@@ -145,6 +153,9 @@ fn handle_daemon_stream(mut stream: UnixStream) -> Result<()> {
         }
         std::process::exit(0);
     }
+
+    let response = handle_daemon_request(request);
+    write_daemon_response(&mut stream, &response)?;
 
     Ok(())
 }

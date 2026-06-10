@@ -64,18 +64,29 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
         let bridge_ok = matches!(&bridge_version, Ok(output) if output.status.success());
         print_command_output(bridge_version);
 
+        // Compare against the user's actual login shell, not a hardcoded one.
+        // A unique sentinel before `command -v` makes the path robust to dotfile
+        // banners that print to stdout on login.
+        let login_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        const SENTINEL: &str = "__AGENT_BRIDGE_CLAUDE__";
         println!();
-        println!("claude_version_via_login_shell:");
-        let login = Command::new("zsh")
-            .args(["-lic", "command -v claude; claude --version"])
+        println!("claude_resolution_via_login_shell ({login_shell}):");
+        let login = Command::new(&login_shell)
+            .args([
+                "-lic",
+                &format!("printf '{SENTINEL}\\n'; command -v claude"),
+            ])
             .current_dir(&cwd)
             .output();
+        // Take the first absolute path on the line after the sentinel.
         let login_path = login.as_ref().ok().and_then(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .map(|line| line.trim().to_string())
-                .filter(|line| !line.is_empty())
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut lines = text.lines();
+            lines.find(|line| line.contains(SENTINEL))?;
+            lines
+                .map(str::trim)
+                .find(|line| line.starts_with('/'))
+                .map(str::to_string)
         });
         print_command_output(login);
 
@@ -85,12 +96,13 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
                     .to_string(),
             );
         }
-        if let Some(login_path) = login_path {
-            if login_path != resolved_program {
-                warnings.push(format!(
-                    "login shell resolves claude to '{login_path}', but Agent Bridge resolves '{resolved_program}'; sessions may run a different binary than your terminal."
-                ));
-            }
+        match login_path {
+            Some(login_path) if login_path != resolved_program => warnings.push(format!(
+                "login shell resolves claude to '{login_path}', but Agent Bridge resolves '{resolved_program}'; sessions may run a different binary than your terminal."
+            )),
+            // No path found (claude not on the login shell's PATH, or the shell
+            // was unavailable) — that is not necessarily a problem, so stay quiet.
+            _ => {}
         }
     }
 

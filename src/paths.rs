@@ -245,10 +245,13 @@ pub fn path_with_local_bin() -> Option<String> {
 /// way so bare command names resolve like the user's login shell.
 pub fn child_path(client_path: Option<&str>) -> Option<String> {
     match client_path {
-        Some(path) => {
-            let home = BaseDirs::new()?;
-            Some(path_with_local_bin_from(path, home.home_dir()))
-        }
+        // Preserve the forwarded client PATH even if the home dir can't be
+        // located; only the ~/.local/bin convenience prepend is skipped then,
+        // so a daemon session never silently reverts to the daemon's PATH.
+        Some(path) => Some(match BaseDirs::new() {
+            Some(home) => path_with_local_bin_from(path, home.home_dir()),
+            None => path.to_string(),
+        }),
         None => path_with_local_bin(),
     }
 }
