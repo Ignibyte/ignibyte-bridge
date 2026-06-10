@@ -45,38 +45,53 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
     }
 
     let mut warnings = Vec::new();
-    if resolved_program.contains("/opt/homebrew/bin/claude") {
-        warnings.push(
-            "/opt/homebrew/bin/claude matched; this older Claude binary previously emitted zero PTY bytes in project directories."
-                .to_string(),
-        );
-    }
-    if command_is_claude(&command_parts[0]) && !resolved_program.contains("/.local/bin/claude") {
-        warnings.push("known-good local Claude path was ~/.local/bin/claude in this environment; resolved path differs.".to_string());
-    }
     if !executable_found {
         warnings.push("resolved program is not executable or could not be found.".to_string());
     }
 
+    // For Claude specifically, derive warnings from observed behavior rather
+    // than hardcoded install paths: does the resolved binary actually report a
+    // version, and does the login shell resolve `claude` to the same binary
+    // Agent Bridge would spawn?
     if command_is_claude(&command_parts[0]) || command_is_claude(&resolved_program) {
         println!();
         println!("claude_version_via_agent_bridge_path:");
-        print_command_output(
-            Command::new(&resolved_program)
-                .arg("--version")
-                .current_dir(&cwd)
-                .env("PATH", &child_path)
-                .output(),
-        );
+        let bridge_version = Command::new(&resolved_program)
+            .arg("--version")
+            .current_dir(&cwd)
+            .env("PATH", &child_path)
+            .output();
+        let bridge_ok = matches!(&bridge_version, Ok(output) if output.status.success());
+        print_command_output(bridge_version);
 
         println!();
         println!("claude_version_via_login_shell:");
-        print_command_output(
-            Command::new("zsh")
-                .args(["-lic", "command -v claude; claude --version"])
-                .current_dir(&cwd)
-                .output(),
-        );
+        let login = Command::new("zsh")
+            .args(["-lic", "command -v claude; claude --version"])
+            .current_dir(&cwd)
+            .output();
+        let login_path = login.as_ref().ok().and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+        });
+        print_command_output(login);
+
+        if !bridge_ok {
+            warnings.push(
+                "`claude --version` via the resolved path did not succeed; the session may fail to start."
+                    .to_string(),
+            );
+        }
+        if let Some(login_path) = login_path {
+            if login_path != resolved_program {
+                warnings.push(format!(
+                    "login shell resolves claude to '{login_path}', but Agent Bridge resolves '{resolved_program}'; sessions may run a different binary than your terminal."
+                ));
+            }
+        }
     }
 
     println!();

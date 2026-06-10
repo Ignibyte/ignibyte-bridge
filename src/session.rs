@@ -188,14 +188,22 @@ pub fn acquire_start_lock(session_dir: &Path, name: &str) -> Result<fs::File> {
 
 pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     let dir = session_dir(name)?;
-    let input = dir.join(INPUT_FIFO);
 
+    // Parse the command before destroying any prior logs, so a start that fails
+    // to parse does not wipe a previous session's transcript.
+    let command = parse_command(cmd)?;
+
+    let input = dir.join(INPUT_FIFO);
     if input.exists() {
         fs::remove_file(&input).with_context(|| format!("failed to remove {}", input.display()))?;
     }
     mkfifo(&input, Mode::from_bits_truncate(0o600))
         .with_context(|| format!("failed to create {}", input.display()))?;
 
+    // Restarting a name preserves the previous run's logs as a single `.prev`
+    // generation rather than silently discarding them.
+    rotate_previous_log(&dir.join(RAW_LOG))?;
+    rotate_previous_log(&dir.join(CLEAN_LOG))?;
     create_private_file(&dir.join(RAW_LOG)).context("failed to create raw log")?;
     create_private_file(&dir.join(CLEAN_LOG)).context("failed to create clean log")?;
     create_private_file(&dir.join(SCREEN_SNAPSHOT)).context("failed to create screen snapshot")?;
@@ -203,7 +211,7 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
     let metadata = SessionMetadata {
         name: name.to_string(),
         cwd: cwd.to_path_buf(),
-        command: parse_command(cmd)?,
+        command,
         status: SessionStatus::Starting,
         supervisor_pid: None,
         child_pid: None,
@@ -215,6 +223,22 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
         exit_code: None,
     };
     save_metadata(&metadata)
+}
+
+/// Preserve a non-empty log as a single `.prev` generation before it is
+/// recreated, so restarting a session name does not silently discard the
+/// previous run's transcript.
+fn rotate_previous_log(path: &Path) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.len() > 0 => {
+            let mut prev = path.as_os_str().to_owned();
+            prev.push(".prev");
+            fs::rename(path, prev)
+                .with_context(|| format!("failed to rotate {}", path.display()))?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub fn wait_for_running_metadata(name: &str) -> Result<SessionMetadata> {

@@ -43,7 +43,9 @@ enum Commands {
     Send {
         /// Session name.
         name: String,
-        /// Text to send to the session.
+        /// Text to send to the session. Leading-dash text is sent verbatim;
+        /// to send a literal `--no-enter`/`--help`, use `send NAME -- --help`.
+        #[arg(allow_hyphen_values = true)]
         text: String,
         /// Do not append Enter/carriage return after the text.
         #[arg(long)]
