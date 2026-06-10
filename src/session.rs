@@ -604,6 +604,25 @@ pub fn read_screen_text(name: &str, tail: usize) -> Result<String> {
     Ok(tail_lines(&contents, tail))
 }
 
+/// Activity derived from `raw.log` without any extra writes: the Unix time of
+/// the last captured output (the log's mtime), seconds idle since then, and the
+/// total bytes captured (the log's size). Returns `None` if the log is missing.
+/// Lets a caller tell whether a session is still producing output (busy) or has
+/// gone quiet (e.g. an agent waiting for it to finish).
+fn session_activity(name: &str) -> Option<(u64, u64, u64)> {
+    let path = session_dir(name).ok()?.join(RAW_LOG);
+    let metadata = fs::metadata(path).ok()?;
+    let len = metadata.len();
+    let last_output_unix = metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let idle_seconds = now_unix().saturating_sub(last_output_unix);
+    Some((last_output_unix, idle_seconds, len))
+}
+
 pub fn print_status(name: &str) -> Result<()> {
     print!("{}", status_text(name)?);
     Ok(())
@@ -624,6 +643,11 @@ pub fn status_text(name: &str) -> Result<String> {
     output.push_str(&format!("supervisor_alive: {supervisor_alive}\n"));
     output.push_str(&format!("child_pid: {:?}\n", metadata.child_pid));
     output.push_str(&format!("child_alive: {child_alive}\n"));
+    if let Some((last_output_unix, idle_seconds, output_bytes)) = session_activity(name) {
+        output.push_str(&format!("last_output_unix: {last_output_unix}\n"));
+        output.push_str(&format!("idle_seconds: {idle_seconds}\n"));
+        output.push_str(&format!("output_bytes: {output_bytes}\n"));
+    }
     if let Some(exit_status) = metadata.exit_status {
         output.push_str(&format!("exit_status: {exit_status}\n"));
     }
@@ -662,11 +686,15 @@ pub fn list_sessions_text() -> Result<String> {
     let mut output = String::new();
     for metadata in sessions {
         let child_alive = pid_is_ours(metadata.child_pid, metadata.child_start_time);
+        let idle = session_activity(&metadata.name)
+            .map(|(_, idle_seconds, _)| format!("{idle_seconds}s"))
+            .unwrap_or_else(|| "-".to_string());
         output.push_str(&format!(
-            "{}\t{:?}\tchild_alive={}\tcmd={}",
+            "{}\t{:?}\tchild_alive={}\tidle={}\tcmd={}",
             metadata.name,
             metadata.status,
             child_alive,
+            idle,
             metadata.command.join(" ")
         ));
         output.push('\n');

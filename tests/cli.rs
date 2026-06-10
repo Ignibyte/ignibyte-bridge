@@ -269,6 +269,41 @@ fn list_reports_empty_then_sorted_sessions() {
 }
 
 #[test]
+fn status_reports_activity_and_idle_grows() {
+    let home = TestHome::new();
+    let _guard = SessionGuard::new(&home, "act");
+
+    home.direct().args(["start", "act", "--cmd", "cat"]).assert().success();
+    home.direct().args(["send", "act", "ping"]).assert().success();
+    assert!(read_contains(&home, "act", "ping"));
+
+    // Right after output, status reports activity fields and low idle.
+    let status = home.status("act");
+    assert!(status.contains("output_bytes:"), "status: {status}");
+    assert!(status.contains("last_output_unix:"), "status: {status}");
+
+    let idle_of = |home: &TestHome| -> u64 {
+        home.status("act")
+            .lines()
+            .find_map(|l| l.strip_prefix("idle_seconds: "))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    let before = idle_of(&home);
+    // Idle should grow once the session goes quiet.
+    assert!(wait_until(Duration::from_secs(5), || idle_of(&home) > before));
+
+    // list carries an idle column too.
+    home.direct()
+        .args(["list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("idle="));
+}
+
+#[test]
 fn unknown_session_gives_clear_error() {
     let home = TestHome::new();
     home.direct()
