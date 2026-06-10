@@ -2,7 +2,7 @@
 
 use std::{
     fs::OpenOptions,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
     path::Path,
     sync::{
@@ -99,6 +99,50 @@ pub fn forward_input(
             Err(error) => return Err(error).context("failed to read input FIFO"),
         }
     }
+}
+
+/// Return the last `tail` lines of a file without reading the whole thing into
+/// memory. Reads fixed-size blocks backward from EOF until enough newlines are
+/// seen or a hard byte cap is hit, then decodes lossily — so an unbounded log
+/// stays cheap to tail and arbitrary (non-UTF-8) PTY bytes never break `read`.
+pub fn tail_file(path: &Path, tail: usize) -> Result<String> {
+    const BLOCK: usize = 64 * 1024;
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+    let mut file = std::fs::File::open(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let len = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .len();
+    if len == 0 || tail == 0 {
+        return Ok(String::new());
+    }
+
+    let floor = len.saturating_sub(MAX_BYTES);
+    let mut pos = len;
+    let mut collected: Vec<u8> = Vec::new();
+    let mut newlines = 0usize;
+
+    while pos > floor {
+        let read_size = BLOCK.min((pos - floor) as usize);
+        pos -= read_size as u64;
+        file.seek(SeekFrom::Start(pos))
+            .with_context(|| format!("failed to seek {}", path.display()))?;
+        let mut block = vec![0_u8; read_size];
+        file.read_exact(&mut block)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        newlines += block.iter().filter(|&&byte| byte == b'\n').count();
+        block.extend_from_slice(&collected);
+        collected = block;
+        // One extra newline beyond `tail` guarantees the last `tail` lines are
+        // whole; tail_lines then slices exactly the requested count.
+        if newlines > tail {
+            break;
+        }
+    }
+
+    Ok(tail_lines(&String::from_utf8_lossy(&collected), tail))
 }
 
 pub fn tail_lines(contents: &str, tail: usize) -> String {

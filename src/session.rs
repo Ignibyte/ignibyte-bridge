@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     keys::encode_key,
-    logs::{capture_output, forward_input, tail_lines},
+    logs::{capture_output, forward_input, tail_file, tail_lines},
     paths::{
         create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin, resolve_cwd,
         resolve_program_path, session_dir, sessions_root, validate_session_name, write_atomic,
@@ -343,10 +343,7 @@ pub fn read_output(name: &str, tail: usize, raw: bool) -> Result<()> {
 pub fn read_output_text(name: &str, tail: usize, raw: bool) -> Result<String> {
     validate_session_name(name)?;
     let path = session_dir(name)?.join(if raw { RAW_LOG } else { CLEAN_LOG });
-    let contents =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
-
-    Ok(tail_lines(&contents, tail))
+    tail_file(&path, tail)
 }
 
 pub fn read_screen(name: &str, tail: usize) -> Result<()> {
