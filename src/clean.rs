@@ -46,6 +46,27 @@ impl AnsiCleaner {
     }
 
     fn step(&mut self, byte: u8, out: &mut Vec<u8>) {
+        // ESC anywhere outside an OSC/string sequence cancels the sequence in
+        // progress and restarts a new one (matching real terminal parsers), so
+        // a truncated or aborted sequence never leaks its tail as literal text.
+        // The OSC/string states are excluded because ESC there legitimately
+        // begins the ST (`ESC \`) terminator.
+        if byte == 0x1b
+            && !matches!(
+                self.state,
+                State::Osc | State::OscEsc | State::StringSeq | State::StringEsc
+            )
+        {
+            // Flush a deferred CR before abandoning Ground so a pending newline
+            // is not lost.
+            if self.pending_cr {
+                self.pending_cr = false;
+                out.push(b'\n');
+            }
+            self.state = State::Escape;
+            return;
+        }
+
         match self.state {
             State::Ground => self.ground(byte, out),
             State::Escape => self.escape(byte),
@@ -172,6 +193,22 @@ mod tests {
         cleaner.clean(b"line\r", &mut out);
         cleaner.clean(b"\nnext", &mut out);
         assert_eq!(String::from_utf8(out).unwrap(), "line\nnext");
+    }
+
+    #[test]
+    fn esc_cancels_an_aborted_csi_sequence() {
+        // A CSI truncated by a new ESC must not leak its tail; both sequences
+        // are stripped.
+        assert_eq!(clean_str(b"\x1b[01;3\x1b[0m"), "");
+        assert_eq!(clean_str(b"\x1b\x1b[0m"), "");
+        assert_eq!(clean_str(b"a\x1b[1bc"), "ac");
+    }
+
+    #[test]
+    fn esc_cancel_preserves_pending_cr() {
+        // A deferred CR followed by an ESC-introduced sequence still yields the
+        // newline.
+        assert_eq!(clean_str(b"a\r\x1b[0mb"), "a\nb");
     }
 
     #[test]
