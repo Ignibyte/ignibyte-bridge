@@ -37,32 +37,47 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
     let mut cleaner = AnsiCleaner::default();
     let mut clean = Vec::new();
     let mut buffer = [0_u8; 8192];
+    // Whether each sink has already reported a failure, so a persistent error
+    // (e.g. a full disk) is logged once rather than every chunk.
+    let mut warned = [false; 3];
 
     loop {
+        // A read error (not EOF) is fatal: without a draining reader the child
+        // would block on the PTY forever, so propagate and let the session stop.
         let read = reader.read(&mut buffer).context("failed to read PTY")?;
         if read == 0 {
             return Ok(());
         }
 
         let chunk = &buffer[..read];
-        raw_log
-            .write_all(chunk)
-            .context("failed to write raw log")?;
-        raw_log.flush().context("failed to flush raw log")?;
+
+        // Each sink is best-effort: a write failure must NOT abort the loop, or
+        // the undrained PTY would wedge the child and freeze the session as a
+        // zombie that still reports Running. Keep draining; report each sink's
+        // first failure once.
+        let raw_result = raw_log.write_all(chunk).and_then(|()| raw_log.flush());
+        warn_once(&mut warned[0], "raw log", raw_result);
 
         clean.clear();
         cleaner.clean(chunk, &mut clean);
-        clean_log
-            .write_all(&clean)
-            .context("failed to write clean log")?;
-        clean_log.flush().context("failed to flush clean log")?;
+        let clean_result = clean_log.write_all(&clean).and_then(|()| clean_log.flush());
+        warn_once(&mut warned[1], "clean log", clean_result);
 
         terminal.process(chunk);
-        write_atomic(
+        let screen_result = write_atomic(
             &session_dir.join(SCREEN_SNAPSHOT),
             trim_screen_snapshot(&terminal.screen().contents()).as_bytes(),
-        )
-        .context("failed to write screen snapshot")?;
+        );
+        warn_once(&mut warned[2], "screen snapshot", screen_result);
+    }
+}
+
+fn warn_once<E: std::fmt::Display>(warned: &mut bool, sink: &str, result: Result<(), E>) {
+    if let Err(error) = result {
+        if !*warned {
+            *warned = true;
+            eprintln!("agent-bridge: {sink} write failed (continuing): {error}");
+        }
     }
 }
 

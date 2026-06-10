@@ -160,7 +160,12 @@ fn write_daemon_response(stream: &mut UnixStream, response: &DaemonResponse) -> 
 
 fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
     let result = match request {
-        DaemonRequest::Start { name, cwd, cmd } => start_session_in_daemon(&name, cwd, &cmd)
+        DaemonRequest::Start {
+            name,
+            cwd,
+            cmd,
+            path,
+        } => start_session_in_daemon(&name, cwd, &cmd, path)
             .map(|metadata| format_start_result(&metadata)),
         DaemonRequest::Send {
             name,
@@ -202,7 +207,12 @@ fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
     }
 }
 
-fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Result<SessionMetadata> {
+fn start_session_in_daemon(
+    name: &str,
+    cwd: Option<PathBuf>,
+    cmd: &str,
+    client_path: Option<String>,
+) -> Result<SessionMetadata> {
     validate_session_name(name)?;
 
     let cwd = resolve_cwd(cwd)?;
@@ -224,10 +234,11 @@ fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Resul
     let thread_cwd = cwd;
     let thread_cmd = cmd.to_string();
     thread::spawn(move || {
-        let (exit_status, exit_code) = match supervise_pty(&thread_name, &thread_cwd, &thread_cmd) {
-            Ok((exit_status, exit_code)) => (exit_status, exit_code),
-            Err(error) => (error.to_string(), None),
-        };
+        let (exit_status, exit_code) =
+            match supervise_pty(&thread_name, &thread_cwd, &thread_cmd, client_path.as_deref()) {
+                Ok((exit_status, exit_code)) => (exit_status, exit_code),
+                Err(error) => (error.to_string(), None),
+            };
 
         if let Err(error) = mark_stopped(&thread_name, Some(exit_status), exit_code) {
             eprintln!("failed to mark session '{thread_name}' stopped: {error:#}");

@@ -165,6 +165,9 @@ fn daemon_request_for_command(command: &Commands) -> Result<Option<DaemonRequest
             // process; the daemon's working directory is unrelated to the user's.
             cwd: Some(resolve_cwd(cwd.clone())?),
             cmd: cmd.clone(),
+            // Send the client's PATH so the daemon runs the command with the
+            // user's environment, not the daemon's.
+            path: std::env::var("PATH").ok(),
         }),
         Commands::Send {
             name,

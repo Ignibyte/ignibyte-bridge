@@ -24,6 +24,11 @@ pub enum DaemonRequest {
         name: String,
         cwd: Option<PathBuf>,
         cmd: String,
+        /// The client's PATH, so the daemon resolves and runs the command with
+        /// the user's environment rather than the daemon's. Older clients omit
+        /// it, in which case the daemon falls back to its own PATH.
+        #[serde(default)]
+        path: Option<String>,
     },
     Send {
         name: String,

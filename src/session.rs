@@ -32,7 +32,7 @@ use crate::{
     logs::{capture_output, forward_input, tail_file, tail_lines},
     procinfo::process_start_time,
     paths::{
-        create_private_file, ensure_bridge_dir, parse_command, path_with_local_bin, resolve_cwd,
+        child_path, create_private_file, ensure_bridge_dir, parse_command, resolve_cwd,
         resolve_program_path, session_dir, sessions_root, validate_session_name, write_atomic,
     },
     CLEAN_LOG, INPUT_FIFO, METADATA, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
@@ -288,15 +288,22 @@ pub fn run_supervisor(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     metadata.updated_at_unix = now_unix();
     save_metadata(&metadata)?;
 
-    match supervise_pty(name, cwd, cmd) {
+    // Direct mode: the supervisor process inherited the client's environment,
+    // so its own PATH is already the user's.
+    match supervise_pty(name, cwd, cmd, None) {
         Ok((exit_status, exit_code)) => mark_stopped(name, Some(exit_status), exit_code),
         Err(error) => mark_stopped(name, Some(error.to_string()), None),
     }
 }
 
-pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<(String, Option<u32>)> {
+pub fn supervise_pty(
+    name: &str,
+    cwd: &Path,
+    cmd: &str,
+    client_path: Option<&str>,
+) -> Result<(String, Option<u32>)> {
     let mut command_parts = parse_command(cmd)?;
-    let path = path_with_local_bin();
+    let path = child_path(client_path);
     if let Some(path) = &path {
         if let Some(resolved) = resolve_program_path(&command_parts[0], path) {
             command_parts[0] = resolved;

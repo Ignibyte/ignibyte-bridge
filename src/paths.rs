@@ -239,6 +239,20 @@ pub fn path_with_local_bin() -> Option<String> {
     ))
 }
 
+/// Compute the PATH a session's child should run with. `client_path`, when set
+/// (daemon mode, forwarded from the client), is used as the base instead of the
+/// current process's PATH (the daemon's); `~/.local/bin` is prepended either
+/// way so bare command names resolve like the user's login shell.
+pub fn child_path(client_path: Option<&str>) -> Option<String> {
+    match client_path {
+        Some(path) => {
+            let home = BaseDirs::new()?;
+            Some(path_with_local_bin_from(path, home.home_dir()))
+        }
+        None => path_with_local_bin(),
+    }
+}
+
 pub fn path_with_local_bin_from(current_path: &str, home_dir: &Path) -> String {
     let local_bin = home_dir.join(".local/bin");
     let local_bin = local_bin.to_string_lossy();
