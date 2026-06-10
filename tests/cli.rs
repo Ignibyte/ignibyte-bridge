@@ -192,6 +192,24 @@ fn restart_bumps_generation_and_preserves_prior_logs() {
 }
 
 #[test]
+fn custom_pty_geometry_is_applied() {
+    let home = TestHome::new();
+    let _guard = SessionGuard::new(&home, "geo");
+
+    // The child should see the requested terminal size.
+    home.direct()
+        .args([
+            "start", "geo", "--rows", "50", "--cols", "200", "--cmd",
+            "sh -c 'stty size; cat'",
+        ])
+        .assert()
+        .success();
+
+    assert!(home.status("geo").contains("geometry: 50x200"));
+    assert!(read_contains(&home, "geo", "50 200"));
+}
+
+#[test]
 fn duplicate_start_is_rejected() {
     let home = TestHome::new();
     let _guard = SessionGuard::new(&home, "dupe");

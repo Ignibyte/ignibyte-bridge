@@ -29,6 +29,11 @@ pub enum DaemonRequest {
         /// it, in which case the daemon falls back to its own PATH.
         #[serde(default)]
         path: Option<String>,
+        /// Optional PTY geometry; the daemon applies defaults when omitted.
+        #[serde(default)]
+        rows: Option<u16>,
+        #[serde(default)]
+        cols: Option<u16>,
     },
     Send {
         name: String,
@@ -131,14 +136,23 @@ mod tests {
             cwd: Some(PathBuf::from("/repo")),
             cmd: "claude".to_string(),
             path: Some("/usr/bin".to_string()),
+            rows: Some(50),
+            cols: Some(160),
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"command\":\"start\""));
         match round_trip(&request) {
-            DaemonRequest::Start { name, cmd, path, .. } => {
+            DaemonRequest::Start {
+                name,
+                cmd,
+                path,
+                rows,
+                ..
+            } => {
                 assert_eq!(name, "s");
                 assert_eq!(cmd, "claude");
                 assert_eq!(path.as_deref(), Some("/usr/bin"));
+                assert_eq!(rows, Some(50));
             }
             other => panic!("unexpected variant: {other:?}"),
         }

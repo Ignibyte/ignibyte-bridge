@@ -16,17 +16,20 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::{
-    clean::AnsiCleaner, paths::write_atomic, CLEAN_LOG, RAW_LOG, SCREEN_COLS, SCREEN_ROWS,
-    SCREEN_SNAPSHOT,
-};
+use crate::{clean::AnsiCleaner, paths::write_atomic, CLEAN_LOG, RAW_LOG, SCREEN_SNAPSHOT};
 
 /// Capture PTY output into the raw/clean logs and the screen snapshot until the
 /// reader reaches EOF or `stop` is set. `reader` owns a dup of the PTY master
 /// fd; a `poll` with a short timeout lets the loop observe `stop` even when a
 /// backgrounded grandchild holds the slave open and no EOF ever arrives, so the
 /// owning thread can always be joined instead of leaking.
-pub fn capture_output(reader: &mut File, session_dir: &Path, stop: &Arc<AtomicBool>) -> Result<()> {
+pub fn capture_output(
+    reader: &mut File,
+    session_dir: &Path,
+    stop: &Arc<AtomicBool>,
+    rows: u16,
+    cols: u16,
+) -> Result<()> {
     let mut raw_log = OpenOptions::new()
         .create(true)
         .append(true)
@@ -39,7 +42,7 @@ pub fn capture_output(reader: &mut File, session_dir: &Path, stop: &Arc<AtomicBo
         .mode(0o600)
         .open(session_dir.join(CLEAN_LOG))
         .context("failed to open clean log")?;
-    let mut terminal = vt100::Parser::new(SCREEN_ROWS, SCREEN_COLS, 2_000);
+    let mut terminal = vt100::Parser::new(rows, cols, 2_000);
     let mut cleaner = AnsiCleaner::default();
     let mut clean = Vec::new();
     let mut buffer = [0_u8; 8192];

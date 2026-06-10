@@ -59,6 +59,11 @@ pub struct SessionMetadata {
     /// clobber the terminal state of a newer run (see [`mark_stopped`]).
     #[serde(default)]
     pub generation: u64,
+    /// PTY geometry for this run (rows, cols). Defaults applied at start.
+    #[serde(default = "default_rows")]
+    pub rows: u16,
+    #[serde(default = "default_cols")]
+    pub cols: u16,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub exit_status: Option<String>,
@@ -76,8 +81,22 @@ pub enum SessionStatus {
     Stopped,
 }
 
-pub fn start_session(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Result<()> {
-    let metadata = start_session_detached(name, cwd, cmd)?;
+fn default_rows() -> u16 {
+    SCREEN_ROWS
+}
+
+fn default_cols() -> u16 {
+    SCREEN_COLS
+}
+
+pub fn start_session(
+    name: &str,
+    cwd: Option<PathBuf>,
+    cmd: &str,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> Result<()> {
+    let metadata = start_session_detached(name, cwd, cmd, rows, cols)?;
     print!("{}", format_start_result(&metadata));
     Ok(())
 }
@@ -86,6 +105,8 @@ pub fn start_session_detached(
     name: &str,
     cwd: Option<PathBuf>,
     cmd: &str,
+    rows: Option<u16>,
+    cols: Option<u16>,
 ) -> Result<SessionMetadata> {
     validate_session_name(name)?;
 
@@ -104,7 +125,7 @@ pub fn start_session_detached(
         }
     }
 
-    initialize_session_files(name, &cwd, cmd)?;
+    initialize_session_files(name, &cwd, cmd, rows, cols)?;
 
     let current_exe = std::env::current_exe().context("failed to locate current executable")?;
     let mut supervisor = Command::new(current_exe);
@@ -194,7 +215,13 @@ pub fn acquire_start_lock(session_dir: &Path, name: &str) -> Result<fs::File> {
 
 /// Initialize a session's files and metadata for a new run, returning the run's
 /// generation number (used by the supervisor to detect a later restart).
-pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<u64> {
+pub fn initialize_session_files(
+    name: &str,
+    cwd: &Path,
+    cmd: &str,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> Result<u64> {
     let dir = session_dir(name)?;
 
     // Parse the command before destroying any prior logs, so a start that fails
@@ -232,6 +259,8 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<u64
         supervisor_start_time: None,
         child_start_time: None,
         generation,
+        rows: rows.filter(|r| *r > 0).unwrap_or(SCREEN_ROWS),
+        cols: cols.filter(|c| *c > 0).unwrap_or(SCREEN_COLS),
         created_at_unix: now_unix(),
         updated_at_unix: now_unix(),
         exit_status: None,
@@ -353,11 +382,15 @@ pub fn supervise_pty(
     }
 
     let session_dir = session_dir(name)?;
+    // Geometry was recorded by initialize_session_files for this run.
+    let (rows, cols) = load_metadata(name)
+        .map(|m| (m.rows, m.cols))
+        .unwrap_or((SCREEN_ROWS, SCREEN_COLS));
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
-            rows: SCREEN_ROWS,
-            cols: SCREEN_COLS,
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -451,7 +484,7 @@ pub fn supervise_pty(
         let output_dir = session_dir.clone();
         let capture_stop = Arc::clone(&output_stop);
         let output_thread = thread::spawn(move || {
-            capture_output(&mut output_reader, &output_dir, &capture_stop)
+            capture_output(&mut output_reader, &output_dir, &capture_stop, rows, cols)
         });
 
         let input_stop = Arc::new(AtomicBool::new(false));
@@ -639,6 +672,7 @@ pub fn status_text(name: &str) -> Result<String> {
     output.push_str(&format!("status: {:?}\n", metadata.status));
     output.push_str(&format!("cwd: {}\n", metadata.cwd.display()));
     output.push_str(&format!("command: {}\n", metadata.command.join(" ")));
+    output.push_str(&format!("geometry: {}x{}\n", metadata.rows, metadata.cols));
     output.push_str(&format!("supervisor_pid: {:?}\n", metadata.supervisor_pid));
     output.push_str(&format!("supervisor_alive: {supervisor_alive}\n"));
     output.push_str(&format!("child_pid: {:?}\n", metadata.child_pid));
@@ -944,6 +978,8 @@ mod tests {
             supervisor_start_time: Some(42),
             child_start_time: Some(43),
             generation: 1,
+            rows: 40,
+            cols: 140,
             created_at_unix: 1000,
             updated_at_unix: 1001,
             exit_status: None,

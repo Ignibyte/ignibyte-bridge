@@ -44,5 +44,7 @@ pub(crate) const RAW_LOG: &str = "raw.log";
 pub(crate) const CLEAN_LOG: &str = "clean.log";
 pub(crate) const SCREEN_SNAPSHOT: &str = "screen.txt";
 pub(crate) const METADATA: &str = "metadata.json";
-pub(crate) const SCREEN_ROWS: u16 = 30;
-pub(crate) const SCREEN_COLS: u16 = 120;
+/// Default PTY geometry when `start` is given no `--rows`/`--cols`. Roomier than
+/// a minimal terminal so TUIs such as Claude Code render with usable width.
+pub(crate) const SCREEN_ROWS: u16 = 40;
+pub(crate) const SCREEN_COLS: u16 = 140;

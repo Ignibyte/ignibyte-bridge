@@ -176,7 +176,9 @@ fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
             cwd,
             cmd,
             path,
-        } => start_session_in_daemon(&name, cwd, &cmd, path)
+            rows,
+            cols,
+        } => start_session_in_daemon(&name, cwd, &cmd, path, rows, cols)
             .map(|metadata| format_start_result(&metadata)),
         DaemonRequest::Send {
             name,
@@ -223,6 +225,8 @@ fn start_session_in_daemon(
     cwd: Option<PathBuf>,
     cmd: &str,
     client_path: Option<String>,
+    rows: Option<u16>,
+    cols: Option<u16>,
 ) -> Result<SessionMetadata> {
     validate_session_name(name)?;
 
@@ -239,7 +243,7 @@ fn start_session_in_daemon(
         }
     }
 
-    let generation = initialize_session_files(name, &cwd, cmd)?;
+    let generation = initialize_session_files(name, &cwd, cmd, rows, cols)?;
 
     let thread_name = name.to_string();
     let thread_cwd = cwd;

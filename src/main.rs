@@ -38,6 +38,12 @@ enum Commands {
         /// Command to start, for example: "python3 -i" or "claude".
         #[arg(long)]
         cmd: String,
+        /// PTY height in rows (default 40).
+        #[arg(long)]
+        rows: Option<u16>,
+        /// PTY width in columns (default 140).
+        #[arg(long)]
+        cols: Option<u16>,
     },
     /// Send input to an already running session.
     Send {
@@ -138,7 +144,13 @@ fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Start { name, cwd, cmd } => start_session(&name, cwd, &cmd),
+        Commands::Start {
+            name,
+            cwd,
+            cmd,
+            rows,
+            cols,
+        } => start_session(&name, cwd, &cmd, rows, cols),
         Commands::Send {
             name,
             text,
@@ -159,7 +171,13 @@ fn main() -> Result<()> {
 
 fn daemon_request_for_command(command: &Commands) -> Result<Option<DaemonRequest>> {
     let request = match command {
-        Commands::Start { name, cwd, cmd } => Some(DaemonRequest::Start {
+        Commands::Start {
+            name,
+            cwd,
+            cmd,
+            rows,
+            cols,
+        } => Some(DaemonRequest::Start {
             name: name.clone(),
             // Resolve against the client's cwd before the request leaves this
             // process; the daemon's working directory is unrelated to the user's.
@@ -168,6 +186,8 @@ fn daemon_request_for_command(command: &Commands) -> Result<Option<DaemonRequest
             // Send the client's PATH so the daemon runs the command with the
             // user's environment, not the daemon's.
             path: std::env::var("PATH").ok(),
+            rows: *rows,
+            cols: *cols,
         }),
         Commands::Send {
             name,
