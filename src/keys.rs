@@ -21,3 +21,33 @@ pub fn encode_key(key: &str) -> Result<&'static [u8]> {
         _ => bail!("unsupported key '{key}'"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_named_keys() {
+        assert_eq!(encode_key("enter").unwrap(), b"\r");
+        assert_eq!(encode_key("escape").unwrap(), b"\x1b");
+        assert_eq!(encode_key("ctrl-c").unwrap(), b"\x03");
+        assert_eq!(encode_key("tab").unwrap(), b"\t");
+        assert_eq!(encode_key("up").unwrap(), b"\x1b[A");
+        assert_eq!(encode_key("backspace").unwrap(), b"\x7f");
+    }
+
+    #[test]
+    fn accepts_aliases_and_is_case_insensitive() {
+        assert_eq!(encode_key("return").unwrap(), encode_key("enter").unwrap());
+        assert_eq!(encode_key("esc").unwrap(), encode_key("escape").unwrap());
+        assert_eq!(encode_key("c-c").unwrap(), encode_key("ctrl-c").unwrap());
+        assert_eq!(encode_key("ESC").unwrap(), encode_key("escape").unwrap());
+        assert_eq!(encode_key("Ctrl-C").unwrap(), encode_key("ctrl-c").unwrap());
+    }
+
+    #[test]
+    fn rejects_unknown_keys() {
+        assert!(encode_key("f13").is_err());
+        assert!(encode_key("").is_err());
+    }
+}

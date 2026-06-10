@@ -298,3 +298,150 @@ pub fn is_executable(path: &Path) -> bool {
         .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn validate_session_name_accepts_safe_names() {
+        for name in ["a", "claude-main", "py_3", "v1.2", "ABC.def-123"] {
+            assert!(validate_session_name(name).is_ok(), "{name} should be valid");
+        }
+    }
+
+    #[test]
+    fn validate_session_name_rejects_traversal_and_flags() {
+        for name in ["", ".", "..", "-foo", "a/b", "a b", "naïve", "a\0b"] {
+            assert!(
+                validate_session_name(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_session_name_rejects_overlong() {
+        assert!(validate_session_name(&"a".repeat(129)).is_err());
+        assert!(validate_session_name(&"a".repeat(128)).is_ok());
+    }
+
+    #[test]
+    fn bridge_root_from_requires_absolute_override() {
+        let abs = bridge_root_from(Some(OsString::from("/tmp/ab-x"))).unwrap();
+        assert_eq!(abs, PathBuf::from("/tmp/ab-x"));
+        assert!(bridge_root_from(Some(OsString::from("relative/dir"))).is_err());
+    }
+
+    #[test]
+    fn path_with_local_bin_prepends_and_dedupes() {
+        let home = Path::new("/home/user");
+        let result = path_with_local_bin_from("/usr/bin:/bin", home);
+        assert_eq!(result, "/home/user/.local/bin:/usr/bin:/bin");
+
+        // An existing ~/.local/bin entry is not duplicated.
+        let result = path_with_local_bin_from("/home/user/.local/bin:/usr/bin", home);
+        assert_eq!(result, "/home/user/.local/bin:/usr/bin");
+
+        // Empty PATH yields just the local bin.
+        assert_eq!(path_with_local_bin_from("", home), "/home/user/.local/bin");
+    }
+
+    #[test]
+    fn resolve_program_path_passes_through_explicit_paths() {
+        assert_eq!(
+            resolve_program_path("/usr/bin/env", "/bin"),
+            Some("/usr/bin/env".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_program_path_searches_path_for_executables() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("mytool");
+        fs::write(&bin, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let path = format!("/nonexistent:{}", dir.path().display());
+        assert_eq!(
+            resolve_program_path("mytool", &path),
+            Some(bin.to_string_lossy().to_string())
+        );
+        // A non-executable file of the same name is skipped.
+        let plain = dir.path().join("plain");
+        fs::write(&plain, "x").unwrap();
+        assert_eq!(resolve_program_path("plain", &path), None);
+    }
+
+    #[test]
+    fn command_is_claude_matches_basename_only() {
+        assert!(command_is_claude("claude"));
+        assert!(command_is_claude("/home/user/.local/bin/claude"));
+        assert!(!command_is_claude("claude-extra"));
+        assert!(!command_is_claude("/opt/claudette"));
+    }
+
+    #[test]
+    fn write_atomic_replaces_content_with_private_perms() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("meta.json");
+        write_atomic(&target, b"first").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"first");
+        write_atomic(&target, b"second").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"second");
+
+        let mode = fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "atomic write must be owner-only");
+
+        // No temp files are left behind.
+        let leftovers = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn create_private_file_is_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log");
+        create_private_file(&path).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn ensure_private_dir_creates_owner_only_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a/b/c");
+        ensure_private_dir(&nested).unwrap();
+        let mode = fs::metadata(&nested).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        // Second call on an existing dir is fine.
+        ensure_private_dir(&nested).unwrap();
+    }
+
+    #[test]
+    fn resolve_cwd_canonicalizes_and_rejects_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_cwd(Some(dir.path().to_path_buf())).unwrap();
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_dir());
+
+        let file = dir.path().join("afile");
+        fs::write(&file, "x").unwrap();
+        assert!(resolve_cwd(Some(file)).is_err());
+    }
+
+    #[test]
+    fn parse_command_splits_and_rejects_empty() {
+        assert_eq!(parse_command("python3 -i").unwrap(), vec!["python3", "-i"]);
+        assert_eq!(
+            parse_command("sh -c 'echo hi'").unwrap(),
+            vec!["sh", "-c", "echo hi"]
+        );
+        assert!(parse_command("   ").is_err());
+    }
+}

@@ -187,3 +187,58 @@ pub fn trim_screen_snapshot(contents: &str) -> String {
         snapshot
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn tail_lines_returns_last_n() {
+        let text = "a\nb\nc\nd\ne\n";
+        assert_eq!(tail_lines(text, 2), "d\ne\n");
+        assert_eq!(tail_lines(text, 0), "");
+    }
+
+    #[test]
+    fn tail_lines_caps_at_available() {
+        assert_eq!(tail_lines("a\nb\n", 10), "a\nb\n");
+        assert_eq!(tail_lines("", 5), "");
+    }
+
+    #[test]
+    fn tail_lines_handles_missing_trailing_newline() {
+        assert_eq!(tail_lines("a\nb\nc", 2), "b\nc\n");
+    }
+
+    #[test]
+    fn trim_snapshot_drops_trailing_blanks_and_spaces() {
+        assert_eq!(trim_screen_snapshot("a  \nb\n\n\n"), "a\nb\n");
+        assert_eq!(trim_screen_snapshot("\n\n"), "");
+        assert_eq!(trim_screen_snapshot(""), "");
+    }
+
+    #[test]
+    fn trim_snapshot_preserves_interior_blanks() {
+        assert_eq!(trim_screen_snapshot("a\n\nb\n"), "a\n\nb\n");
+    }
+
+    #[test]
+    fn tail_file_returns_last_lines_and_tolerates_non_utf8() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // Lines plus an invalid UTF-8 byte that must not break tailing.
+        file.write_all(b"one\ntwo\nthree\n\xff\xfe\nfour\n").unwrap();
+        file.flush().unwrap();
+        let out = tail_file(file.path(), 2).unwrap();
+        assert!(out.ends_with("four\n"), "got {out:?}");
+        assert_eq!(out.lines().count(), 2);
+    }
+
+    #[test]
+    fn tail_file_handles_more_lines_than_present() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(b"only\n").unwrap();
+        file.flush().unwrap();
+        assert_eq!(tail_file(file.path(), 100).unwrap(), "only\n");
+    }
+}

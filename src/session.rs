@@ -757,3 +757,105 @@ pub fn now_unix() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_metadata() -> SessionMetadata {
+        SessionMetadata {
+            name: "demo".to_string(),
+            cwd: PathBuf::from("/tmp"),
+            command: vec!["cat".to_string()],
+            status: SessionStatus::Running,
+            supervisor_pid: Some(123),
+            child_pid: Some(124),
+            supervisor_start_time: Some(42),
+            child_start_time: Some(43),
+            created_at_unix: 1000,
+            updated_at_unix: 1001,
+            exit_status: None,
+            exit_code: None,
+        }
+    }
+
+    #[test]
+    fn metadata_round_trips_through_json() {
+        let metadata = sample_metadata();
+        let json = serde_json::to_string(&metadata).unwrap();
+        let back: SessionMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, metadata.name);
+        assert_eq!(back.status, SessionStatus::Running);
+        assert_eq!(back.child_start_time, Some(43));
+        assert_eq!(back.exit_code, None);
+    }
+
+    #[test]
+    fn metadata_tolerates_legacy_json_without_new_fields() {
+        // A file written before start-time/exit-code fields existed.
+        let legacy = r#"{
+            "name":"old","cwd":"/tmp","command":["cat"],"status":"running",
+            "supervisor_pid":1,"child_pid":2,
+            "created_at_unix":1,"updated_at_unix":1,"exit_status":null
+        }"#;
+        let metadata: SessionMetadata = serde_json::from_str(legacy).unwrap();
+        assert_eq!(metadata.supervisor_start_time, None);
+        assert_eq!(metadata.exit_code, None);
+    }
+
+    #[test]
+    fn status_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&SessionStatus::Starting).unwrap(),
+            "\"starting\""
+        );
+    }
+
+    #[test]
+    fn pid_is_ours_requires_liveness_and_matching_token() {
+        let own = std::process::id();
+        let token = process_start_time(own);
+        // Live process with the correct token is ours.
+        assert!(pid_is_ours(Some(own), token));
+        // Live process with a wrong token is an impostor (PID reuse).
+        assert!(!pid_is_ours(Some(own), Some(u64::MAX)));
+        // No recorded token falls back to a bare liveness probe.
+        assert!(pid_is_ours(Some(own), None));
+        // No PID at all is never ours.
+        assert!(!pid_is_ours(None, token));
+    }
+
+    #[test]
+    fn session_is_active_tracks_status_and_identity() {
+        let own = std::process::id();
+        let token = process_start_time(own);
+
+        let mut metadata = sample_metadata();
+        metadata.supervisor_pid = Some(own);
+        metadata.supervisor_start_time = token;
+        metadata.child_pid = None;
+        metadata.child_start_time = None;
+        assert!(session_is_active(&metadata));
+
+        // Stopped is never active even with a live PID.
+        metadata.status = SessionStatus::Stopped;
+        assert!(!session_is_active(&metadata));
+
+        // Running but with a reused PID (wrong token) is not active.
+        metadata.status = SessionStatus::Running;
+        metadata.supervisor_start_time = Some(u64::MAX);
+        assert!(!session_is_active(&metadata));
+    }
+
+    #[test]
+    fn format_start_result_distinguishes_running_from_finished() {
+        let mut metadata = sample_metadata();
+        assert!(format_start_result(&metadata).contains("started session 'demo'"));
+
+        metadata.status = SessionStatus::Stopped;
+        metadata.exit_code = Some(0);
+        let finished = format_start_result(&metadata);
+        assert!(finished.contains("ran to completion"));
+        assert!(finished.contains("exit code 0"));
+    }
+}
