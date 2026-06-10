@@ -1,0 +1,18 @@
+[package]
+name = "agent-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Local persistent PTY session controller for AI coding agents"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+libc = "0.2"
+nix = { version = "0.29", features = ["fs", "signal"] }
+portable-pty = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+shell-words = "1"
+strip-ansi-escapes = "0.2"
+vt100 = "0.16.2"
