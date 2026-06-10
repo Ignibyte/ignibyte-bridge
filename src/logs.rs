@@ -1,7 +1,7 @@
 //! PTY output capture, input forwarding, and log/snapshot text helpers.
 
 use std::{
-    fs::OpenOptions,
+    fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
     path::Path,
@@ -68,21 +68,17 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
 
 /// Forward bytes from the session FIFO to the PTY until `stop` is set.
 ///
-/// The FIFO is opened read+write so the reader always holds a write end and
-/// never sees EOF when senders disconnect, and `O_NONBLOCK` lets the loop wake
-/// periodically to observe `stop` — so the owner can join this thread when the
-/// child exits instead of leaking it (and the dup'd PTY master fd it holds).
+/// `fifo` must already be open read+write with `O_NONBLOCK` (the caller opens
+/// it before publishing the session as running so a racing `send` always finds
+/// a reader). The read+write handle never sees EOF when senders disconnect, and
+/// `O_NONBLOCK` lets the loop wake periodically to observe `stop` — so the owner
+/// can join this thread when the child exits instead of leaking it (and the
+/// dup'd PTY master fd it holds).
 pub fn forward_input(
-    input_fifo: &Path,
+    mut fifo: File,
     writer: &mut Box<dyn Write + Send>,
     stop: &Arc<AtomicBool>,
 ) -> Result<()> {
-    let mut fifo = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(input_fifo)
-        .with_context(|| format!("failed to open {}", input_fifo.display()))?;
     let mut buffer = [0_u8; 8192];
 
     loop {

@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use nix::{
     errno::Errno,
     sys::{
@@ -237,6 +237,18 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
         .context("failed to spawn command in PTY")?;
     drop(pair.slave);
 
+    // Open the FIFO reader before publishing the session as Running, so a send
+    // that races the start always finds a reader (no ENXIO window). O_RDWR keeps
+    // a write end open so the read side never sees EOF; O_NONBLOCK lets
+    // forward_input poll the stop flag.
+    let input_fifo_path = session_dir.join(INPUT_FIFO);
+    let input_fifo = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&input_fifo_path)
+        .with_context(|| format!("failed to open {}", input_fifo_path.display()))?;
+
     let mut metadata = load_metadata(name)?;
     metadata.command = command_parts;
     metadata.status = SessionStatus::Running;
@@ -257,10 +269,9 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
     let output_thread = thread::spawn(move || capture_output(&mut output_reader, &output_dir));
 
     let stop = Arc::new(AtomicBool::new(false));
-    let input_fifo = session_dir.join(INPUT_FIFO);
     let input_stop = Arc::clone(&stop);
     let input_thread =
-        thread::spawn(move || forward_input(&input_fifo, &mut input_writer, &input_stop));
+        thread::spawn(move || forward_input(input_fifo, &mut input_writer, &input_stop));
 
     let exit_status = child.wait().context("failed while waiting for child")?;
 
@@ -327,15 +338,44 @@ pub fn write_session_bytes(name: &str, bytes: &[u8]) -> Result<()> {
     }
 
     let input_fifo = session_dir(name)?.join(INPUT_FIFO);
+    // O_NONBLOCK on open makes a missing reader fail fast with ENXIO instead of
+    // blocking forever; we then clear it so the write itself blocks until fully
+    // delivered rather than returning WouldBlock after a partial prefix.
     let mut fifo = OpenOptions::new()
         .write(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(&input_fifo)
-        .with_context(|| format!("failed to open input FIFO for '{}'", name))?;
+        .map_err(|error| {
+            if error.raw_os_error() == Some(libc::ENXIO) {
+                anyhow!("session '{name}' has no input reader; it may still be starting or its owner exited")
+            } else {
+                anyhow::Error::new(error)
+                    .context(format!("failed to open input FIFO for '{name}'"))
+            }
+        })?;
+
+    clear_nonblocking(&fifo)?;
 
     fifo.write_all(bytes).context("failed to write input")?;
     fifo.flush().context("failed to flush input")?;
 
+    Ok(())
+}
+
+/// Clear `O_NONBLOCK` on an open file descriptor so subsequent writes block.
+fn clear_nonblocking(file: &fs::File) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let fd = file.as_raw_fd();
+    // SAFETY: `fd` is a valid descriptor owned by `file` for the call's duration.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(std::io::Error::last_os_error()).context("failed to read FIFO flags");
+    }
+    // SAFETY: same as above.
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error()).context("failed to set FIFO blocking");
+    }
     Ok(())
 }
 
