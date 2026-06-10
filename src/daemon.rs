@@ -18,9 +18,9 @@ use crate::{
     },
     protocol::{try_send_daemon_request, DaemonRequest, DaemonResponse},
     session::{
-        format_started_session, initialize_session_files, list_sessions_text, load_metadata,
-        mark_stopped, read_output_text, read_screen_text, send_input_silent, send_keys_silent,
-        session_is_active, status_text, stop_session_silent, supervise_pty,
+        acquire_start_lock, format_started_session, initialize_session_files, list_sessions_text,
+        load_metadata, mark_stopped, read_output_text, read_screen_text, send_input_silent,
+        send_keys_silent, session_is_active, status_text, stop_session_silent, supervise_pty,
         wait_for_running_metadata, SessionMetadata, SessionStatus,
     },
 };
@@ -140,6 +140,8 @@ fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Resul
 
     let session_dir = session_dir(name)?;
     ensure_bridge_dir(&session_dir)?;
+
+    let _start_lock = acquire_start_lock(&session_dir, name)?;
 
     if let Ok(metadata) = load_metadata(name) {
         if session_is_active(&metadata) {

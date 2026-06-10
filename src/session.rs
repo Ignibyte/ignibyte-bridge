@@ -84,6 +84,10 @@ pub fn start_session_detached(
     let session_dir = session_dir(name)?;
     ensure_bridge_dir(&session_dir)?;
 
+    // Held until this function returns (past wait_for_running_metadata) so two
+    // concurrent starts of the same name cannot both initialize and spawn.
+    let _start_lock = acquire_start_lock(&session_dir, name)?;
+
     if let Ok(metadata) = load_metadata(name) {
         if session_is_active(&metadata) {
             bail!("session '{name}' is already running");
@@ -140,6 +144,27 @@ pub fn format_started_session(metadata: &SessionMetadata) -> String {
     )
 }
 
+/// Acquire an exclusive, non-blocking advisory lock on the per-session
+/// `start.lock` file. The returned handle holds the lock until dropped; a
+/// second concurrent start of the same name fails fast instead of racing.
+/// flock works across both processes (direct mode) and threads (daemon).
+pub fn acquire_start_lock(session_dir: &Path, name: &str) -> Result<fs::File> {
+    use std::os::unix::io::AsRawFd;
+
+    let lock = create_private_file(&session_dir.join("start.lock"))
+        .context("failed to open session start lock")?;
+    // SAFETY: the fd is valid and owned by `lock` for the duration of the call.
+    let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        let error = std::io::Error::last_os_error();
+        if matches!(error.raw_os_error(), Some(libc::EWOULDBLOCK)) {
+            bail!("session '{name}' is already starting");
+        }
+        return Err(error).context("failed to lock session start");
+    }
+    Ok(lock)
+}
+
 pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     let dir = session_dir(name)?;
     let input = dir.join(INPUT_FIFO);
@@ -188,6 +213,17 @@ pub fn wait_for_running_metadata(name: &str) -> Result<SessionMetadata> {
         }
     }
 
+    // Timed out still in Starting: converge to a clean Stopped state rather than
+    // reporting failure while an in-flight supervisor keeps running behind us.
+    if let Ok(metadata) = load_metadata(name) {
+        if let Some(pid) = metadata.supervisor_pid {
+            let _ = terminate_pid(pid as i32);
+        }
+        if let Some(pid) = metadata.child_pid {
+            let _ = terminate_pid(pid as i32);
+        }
+    }
+    let _ = mark_stopped(name, Some("start timed out".to_string()));
     bail!("session '{name}' did not report running within 5 seconds");
 }
 
@@ -258,6 +294,14 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
         .with_context(|| format!("failed to open {}", input_fifo_path.display()))?;
 
     let mut metadata = load_metadata(name)?;
+    // A stop that landed during startup marked the session Stopped before any
+    // PID was recorded. Honor it: kill the child we just spawned instead of
+    // resurrecting the session by promoting it to Running.
+    if metadata.status == SessionStatus::Stopped {
+        let _ = child.kill();
+        let _ = child.wait();
+        bail!("session '{name}' was stopped during startup");
+    }
     metadata.command = command_parts;
     metadata.status = SessionStatus::Running;
     metadata.child_pid = child.process_id();
