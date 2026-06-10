@@ -19,41 +19,41 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 
 | ID | Severity | Finding | Status |
 |----|----------|---------|--------|
-| m1 | high | Session logs, screen snapshots, and metadata created world/group-readable (0644 files in 0755 dirs), exposing every session secret to other local users | open |
-| m3 | high | Daemon-routed start resolves omitted/relative --cwd against the daemon's working directory, not the client's | open |
-| m4 | high | Daemon mode permanently leaks the forward_input thread, the FIFO fd, and the PTY master fd per session lifecycle, eventually wedging the daemon on EMFILE/PTY exhaustion | open |
-| c1 | medium | clean.log silently deletes tabs (and every C0 control except \n), corrupting `read` output | open |
-| c2 | medium | Stale 'Running' metadata plus PID reuse falsely blocks `start` and falsifies status/list after any unclean shutdown | open |
-| c3 | medium | Client has no socket timeouts: every CLI command hangs forever when the daemon accepts but never replies | open |
-| m10 | medium | --direct start silently clobbers a live daemon-owned session of the same name, orphaning its child (asymmetric liveness check) | open |
-| m11 | medium | start-vs-start TOCTOU: the check-init-spawn sequence has no lock and a session in Starting status never blocks a second start | open |
-| m12 | medium | stop during session startup is silently lost: no status gate, pids not yet recorded, and the owner later unconditionally writes Running | open |
-| m13 | medium | Daemon shutdown calls std::process::exit(0) while request threads and session owners are mid-flight, and skips Starting sessions entirely | open |
-| m14 | medium | AGENT_BRIDGE_HOME is trusted verbatim and the docs point it at world-writable /tmp, enabling symlink/pre-creation attacks | open |
-| m16 | medium | Stateless per-chunk ANSI stripping corrupts clean.log whenever an escape sequence splits across an 8KB read boundary | open |
-| m17 | medium | read loads the entire unbounded log into memory to tail a few lines | open |
-| m18 | medium | Daemon-started sessions use the daemon's PATH/env, while `doctor` always diagnoses the client's environment | open |
-| m19 | medium | Session exit is never detected when grandchildren hold the PTY slave: output-thread join hangs and metadata stays Running forever | open |
-| m2 | medium | metadata.json written with truncate-then-write (fs::write), racing every concurrent reader and writer with no atomicity | open |
-| m20 | medium | Any capture-thread write error (disk full) silently kills output capture and freezes the session as a zombie 'Running' | open |
-| m5 | medium | stop blind-signals persisted PIDs with no identity or status check: after crash/reboot it SIGKILLs a reused PID and its whole process group, and EPERM wedges the session forever | open |
-| m6 | medium | read and read --raw fail permanently once a session log contains non-UTF-8 bytes | open |
-| m7 | medium | Session names '.', '..', and leading '-' pass validation: '..' scribbles session files into the bridge root, and '-name' breaks the direct-mode supervisor re-spawn | open |
-| m8 | medium | screen.txt is rewritten with non-atomic fs::write on every PTY chunk, so concurrent screen reads see empty or truncated screens | open |
-| m9 | medium | FIFO input writes are not atomic: O_NONBLOCK write_all delivers a partial prefix then errors on large sends, and concurrent senders can interleave mid-message | open |
-| c4 | low | doctor ships hardcoded author-machine heuristics that emit false warnings on every other install layout | open |
-| m15 | low | Daemon has no read timeout or request-size limit and spawns an unbounded thread per connection (local DoS) | open |
-| m21 | low | Daemon startup socket takeover is a check-connect-remove-bind TOCTOU that can unlink a live daemon's socket | open |
-| m22 | low | Daemon-mode error between spawn and wait leaks an unreaped child that becomes a permanent zombie and wedges stop/shutdown | open |
-| m24 | low | 5-second start timeout reports failure but leaves the detached supervisor running, contradicting itself | open |
-| m25 | low | Daemon responses flatten error chains, hiding root causes and conflating missing session with corrupt state | open |
-| m26 | low | Malformed or unknown daemon requests get no response, so clients see only 'daemon closed connection without a response' | open |
-| m27 | low | `send` text beginning with '-' is rejected by clap instead of being sent to the session | open |
-| m28 | low | Doc example `agent-bridge send claude "..." --enter` errors: the flag is --no-enter | open |
-| m29 | low | README quickstart never exercises the daemon it starts: AGENT_BRIDGE_HOME on the daemon line only | open |
-| m30 | low | start reports failure for fast-exiting commands even when they succeed (exit code 0) | open |
-| m31 | low | Restarting a session name silently erases its previous raw/clean logs and screen | open |
-| m32 | low | send immediately after start can hit the FIFO before any reader exists (ENXIO window): Running is saved before forward_input opens the FIFO | open |
+| m1 | high | Session logs, screen snapshots, and metadata created world/group-readable (0644 files in 0755 dirs), exposing every session secret to other local users | fixed (`c53d557`) |
+| m3 | high | Daemon-routed start resolves omitted/relative --cwd against the daemon's working directory, not the client's | fixed (`a3c417f`) |
+| m4 | high | Daemon mode permanently leaks the forward_input thread, the FIFO fd, and the PTY master fd per session lifecycle, eventually wedging the daemon on EMFILE/PTY exhaustion | fixed (`22e39b0`) |
+| c1 | medium | clean.log silently deletes tabs (and every C0 control except \n), corrupting `read` output | fixed (`e334802`) |
+| c2 | medium | Stale 'Running' metadata plus PID reuse falsely blocks `start` and falsifies status/list after any unclean shutdown | fixed (`cba0519`) |
+| c3 | medium | Client has no socket timeouts: every CLI command hangs forever when the daemon accepts but never replies | fixed (`a9c5604`) |
+| m10 | medium | --direct start silently clobbers a live daemon-owned session of the same name, orphaning its child (asymmetric liveness check) | fixed (`cba0519`) |
+| m11 | medium | start-vs-start TOCTOU: the check-init-spawn sequence has no lock and a session in Starting status never blocks a second start | fixed (`13cdda5`) |
+| m12 | medium | stop during session startup is silently lost: no status gate, pids not yet recorded, and the owner later unconditionally writes Running | fixed (`13cdda5`) |
+| m13 | medium | Daemon shutdown calls std::process::exit(0) while request threads and session owners are mid-flight, and skips Starting sessions entirely | fixed (`a9c5604`) |
+| m14 | medium | AGENT_BRIDGE_HOME is trusted verbatim and the docs point it at world-writable /tmp, enabling symlink/pre-creation attacks | fixed (`c53d557`) |
+| m16 | medium | Stateless per-chunk ANSI stripping corrupts clean.log whenever an escape sequence splits across an 8KB read boundary | fixed (`e334802`) |
+| m17 | medium | read loads the entire unbounded log into memory to tail a few lines | fixed (`ebba73f`) |
+| m18 | medium | Daemon-started sessions use the daemon's PATH/env, while `doctor` always diagnoses the client's environment | fixed (`dc2dbce`) |
+| m19 | medium | Session exit is never detected when grandchildren hold the PTY slave: output-thread join hangs and metadata stays Running forever | fixed (`22e39b0`) |
+| m2 | medium | metadata.json written with truncate-then-write (fs::write), racing every concurrent reader and writer with no atomicity | fixed (`c0cad2a`) |
+| m20 | medium | Any capture-thread write error (disk full) silently kills output capture and freezes the session as a zombie 'Running' | fixed (`dc2dbce`) |
+| m5 | medium | stop blind-signals persisted PIDs with no identity or status check: after crash/reboot it SIGKILLs a reused PID and its whole process group, and EPERM wedges the session forever | fixed (`cba0519`) |
+| m6 | medium | read and read --raw fail permanently once a session log contains non-UTF-8 bytes | fixed (`ebba73f`) |
+| m7 | medium | Session names '.', '..', and leading '-' pass validation: '..' scribbles session files into the bridge root, and '-name' breaks the direct-mode supervisor re-spawn | fixed (`68783fb`) |
+| m8 | medium | screen.txt is rewritten with non-atomic fs::write on every PTY chunk, so concurrent screen reads see empty or truncated screens | fixed (`c0cad2a`) |
+| m9 | medium | FIFO input writes are not atomic: O_NONBLOCK write_all delivers a partial prefix then errors on large sends, and concurrent senders can interleave mid-message | fixed (`d874363`) |
+| c4 | low | doctor ships hardcoded author-machine heuristics that emit false warnings on every other install layout | fixed (`bc06198`) |
+| m15 | low | Daemon has no read timeout or request-size limit and spawns an unbounded thread per connection (local DoS) | fixed (`a9c5604`) |
+| m21 | low | Daemon startup socket takeover is a check-connect-remove-bind TOCTOU that can unlink a live daemon's socket | fixed (`a9c5604`) |
+| m22 | low | Daemon-mode error between spawn and wait leaks an unreaped child that becomes a permanent zombie and wedges stop/shutdown | fixed (`a9c5604`) |
+| m24 | low | 5-second start timeout reports failure but leaves the detached supervisor running, contradicting itself | fixed (`13cdda5`) |
+| m25 | low | Daemon responses flatten error chains, hiding root causes and conflating missing session with corrupt state | fixed (`a9c5604`) |
+| m26 | low | Malformed or unknown daemon requests get no response, so clients see only 'daemon closed connection without a response' | fixed (`a9c5604`) |
+| m27 | low | `send` text beginning with '-' is rejected by clap instead of being sent to the session | fixed (`bc06198`) |
+| m28 | low | Doc example `agent-bridge send claude "..." --enter` errors: the flag is --no-enter | fixed (docs) |
+| m29 | low | README quickstart never exercises the daemon it starts: AGENT_BRIDGE_HOME on the daemon line only | fixed (docs) |
+| m30 | low | start reports failure for fast-exiting commands even when they succeed (exit code 0) | fixed (`ef03adc`) |
+| m31 | low | Restarting a session name silently erases its previous raw/clean logs and screen | fixed (`bc06198`) |
+| m32 | low | send immediately after start can hit the FIFO before any reader exists (ENXIO window): Running is saved before forward_input opens the FIFO | fixed (`d874363`) |
 
 ## Confirmed findings
 
@@ -62,7 +62,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** high (finder claimed critical; adjusted at verification)
 - **Anchor:** initialize_session_files src/main.rs:647 (also run_daemon create_dir_all src/main.rs:330, start_session_detached src/main.rs:534, save_metadata src/main.rs:1188)
 - **Found by:** security, unix-pty, errors, manual-read
-- **Status:** open
+- **Status:** fixed in `c53d557` — Dirs created 0700, logs/metadata/screen 0600 via ensure_private_dir/create_private_file.
 
 **Problem.** The code locks down only the socket (chmod 0600, run_daemon src/main.rs:343) and the FIFO (mkfifo 0600, src/main.rs:644); everything else is created under the default umask: ~/.agent-bridge and every session dir via create_dir_all (0755), raw.log/clean.log/screen.txt via File::create (0666 & umask = 0644), metadata.json via fs::write (0644). Verified empirically on this machine (umask 022 -> dirs 0755, files 0644). raw.log/clean.log capture every PTY byte — typed prompts, pasted keys, terminal-echoed input, and all program output (API keys, auth tokens, source, Claude transcripts) — and metadata.json records the full command line, which may carry secrets as arguments. On stock macOS every human account is in group staff and /Users/<user> is drwxr-x--- (group staff r-x), so another local staff user can traverse home -> ~/.agent-bridge (0755) -> sessions/<name> (0755) and read all transcripts; on any host with a 0755 home, 'other' gets in too. No chmod is ever applied to these artifacts, so the exposure lasts their whole lifetime.
 
@@ -73,7 +73,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** high
 - **Anchor:** start_session_in_daemon src/main.rs:584 (root cause daemon_request_for_command src/main.rs:243)
 - **Found by:** concurrency, unix-pty, protocol, spec, manual-read
-- **Status:** open
+- **Status:** fixed in `a3c417f` — Client resolves --cwd to an absolute path before routing to the daemon.
 
 **Problem.** daemon_request_for_command forwards cwd: Option<PathBuf> verbatim (src/main.rs:243-247) without client-side resolution; start_session_in_daemon resolves None via std::env::current_dir() OF THE DAEMON PROCESS and canonicalizes relative paths against the daemon's cwd (src/main.rs:583-586). In the recommended setup (daemon up, commands auto-routed), `agent-bridge start s --cmd claude` run from inside a project silently starts Claude in whatever directory the daemon was launched from ($HOME, etc.), so the coding agent reads/edits the wrong repository. Verified empirically: with a daemon launched from /private/tmp/ab-daemon-cwd, `start py --cmd "python3 -i"` from ~/Projects/agent-bridge produced a session whose status reports cwd /private/tmp/ab-daemon-cwd. `--cwd ./subdir` likewise resolves against the daemon's cwd (wrong directory or a confusing 'failed to canonicalize cwd' error). Direct mode resolves the client's cwd correctly, so behavior changes silently depending on whether a daemon happens to be reachable.
 
@@ -84,7 +84,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** high
 - **Anchor:** forward_input src/main.rs:809 (spawned and abandoned at supervise_pty src/main.rs:758)
 - **Found by:** unix-pty, errors, concurrency, manual-read
-- **Status:** open
+- **Status:** fixed in `22e39b0` — forward_input polls a stop flag; supervise_pty joins it on child exit, releasing fds/thread.
 
 **Problem.** forward_input loops forever (src/main.rs:809-830): it holds the FIFO open O_RDWR — the thread is its own writer, so read() never returns EOF and the read==0 branch is dead code — and nothing signals it when the child exits; supervise_pty joins only the output thread (line 763) and abandons the input thread (`_input_thread`, line 758). The thread also owns the PTY master writer (portable-pty take_writer dups the master fd — verified in portable-pty unix.rs — so drop(pair.master) does not release the PTY). In direct mode the supervisor process exit reaps everything, but in the long-lived daemon every start/stop cycle permanently leaks 1 blocked OS thread + 2 fds (the old FIFO inode and the dup'd PTY master) + 1 system-wide PTY slot (the device frees only when the last master fd closes). At macOS's default 256-fd soft limit, roughly 120 session lifecycles wedge the daemon: openpty fails ('failed to open PTY') for all new sessions, listener.accept() degenerates into a hot error-print spin taking down all commands, and ptmx exhaustion can affect other terminal apps. Only a daemon restart recovers.
 
@@ -95,7 +95,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** capture_output src/main.rs:794
 - **Found by:** critic
-- **Status:** open
+- **Status:** fixed in `e334802` — AnsiCleaner preserves tabs and normalizes CR to newline.
 
 **Problem.** strip_ansi_escapes::strip's vte Performer only forwards b'\n' from execute(); every other C0 control byte -- \t, lone \r, \x08 -- is silently dropped (verified in strip-ansi-escapes 0.2 source: `fn execute(&mut self, byte: u8) { if byte == b'\n' { ... } }`). Concrete failures: (1) any tab-containing output (cat-ing a Makefile inside a session, go test/gofmt output, TSV data, a REPL printing 'a\tb') reaches clean.log with the tabs deleted, so `agent-bridge read` shows 'ab' -- the manager AI sees silently corrupted file content and will reproduce the corruption if it copies it back; (2) lone-CR progress redraws (pip/npm/cargo spinners) lose their only line separator, fusing hundreds of overwritten frames into one mega-line, which breaks `--tail` line counting. This is distinct from the already-found chunk-boundary escape-splitting finding: it happens on every chunk, by the crate's design, with no chunking involved. The only workaround, `read --raw`, fails the stated purpose (it is full of ANSI noise) and is separately broken on non-UTF-8.
 
@@ -106,7 +106,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** start_session_detached src/main.rs:537-545
 - **Found by:** critic
-- **Status:** open
+- **Status:** fixed in `cba0519` — Liveness gated on PID + start-time token, so a reused PID no longer blocks start or misreports status.
 
 **Problem.** If the session owner dies without running mark_stopped (supervisor SIGKILLed, daemon crash, power loss), metadata.json keeps status=Running with the old pids forever. The start gate then trusts a bare kill(pid,0) liveness probe: start_session_detached src/main.rs:537-545 (and start_session_in_daemon src/main.rs:595-603) bails "session '<name>' is already running" as soon as the recorded supervisor/child pid has been recycled by ANY unrelated process -- routine on macOS where pids wrap at 99999 within days of normal use. Because process_alive (src/main.rs:1308-1314) also maps EPERM to alive, a pid recycled by a root-owned daemon blocks the name indefinitely. Result: a core command (`start`) refuses to work for that session name even though nothing is running, and status_text/list_sessions_text (src/main.rs:962-967, 1016-1018) report supervisor_alive/child_alive=true for an impostor process, misleading the operator. The only built-in remedy is `stop`, which the already-found stop finding shows SIGKILLs the innocent recycled pid and its process group -- so the safe path out is hand-editing metadata.json. This is the read-side/staleness half of the persisted-pid problem; the existing finding covers only stop's blind signaling.
 
@@ -117,7 +117,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** try_send_daemon_request src/main.rs:296-300
 - **Found by:** critic
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Client sets a 60s socket timeout with a clear "daemon suspended/wedged" error.
 
 **Problem.** try_send_daemon_request never calls set_read_timeout/set_write_timeout (grep confirms zero timeouts in the whole binary). After a successful connect it blocks in read_line at src/main.rs:296-300 indefinitely. Concrete scenario requiring no malice: the docs/README run the daemon in a foreground terminal; the user suspends that terminal job with ctrl-Z (SIGSTOP) or the terminal app stops scheduling it. The kernel still completes new connections via the listen backlog and buffers the request write, so every subsequent agent-bridge command (start/send/read/screen/status/list/stop) hangs silently forever -- no error, no fallback to direct mode. For the primary use case (a manager AI shelling out to this CLI), one wedged daemon stalls the whole agent workflow with no diagnostic. This is the client-side counterpart, in a different process and code path, of the already-found daemon-side missing read timeout (that finding is about DoS-ing the daemon, not about the CLI hanging).
 
@@ -128,7 +128,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** start_session_detached src/main.rs:537-545
 - **Found by:** concurrency, unix-pty, protocol, spec, errors
-- **Status:** open
+- **Status:** fixed in `cba0519` — Shared session_is_active checks supervisor AND child PID in both start paths.
 
 **Problem.** start_session_detached's already-running guard (src/main.rs:537-545) only bails if supervisor_pid is alive, but daemon-owned sessions always have supervisor_pid=None — the daemon path correctly checks child_pid instead (src/main.rs:595-602). So `agent-bridge --direct start name` against a live daemon session — a documented debugging workflow — passes deterministically, no race timing required. Verified: with daemon-owned 'py' (child 38402) Running, `--direct start py` succeeded; metadata repointed to new pids 38408/38409 and python 38402 stayed alive but untracked — `stop` can never reach it again. initialize_session_files deletes the live FIFO and truncates raw/clean/screen logs while the daemon's capture thread holds open append fds, so two PTYs interleave into one raw.log/clean.log and fight over screen.txt; when the daemon's owner thread later sees its child exit it calls mark_stopped, clobbering the new supervisor session's Running metadata so send/status report 'not running' for a session that is alive. The same hole fires without --direct after a daemon crash (socket gone so commands go direct, but the HUP-surviving child is still alive).
 
@@ -139,7 +139,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** start_session_detached src/main.rs:537 (mirror at start_session_in_daemon src/main.rs:595)
 - **Found by:** concurrency, errors, protocol, manual-read, unix-pty
-- **Status:** open
+- **Status:** fixed in `13cdda5` — Per-session flock on start.lock held through wait_for_running_metadata.
 
 **Problem.** Both start paths do load_metadata -> check -> initialize_session_files -> spawn with no lock (direct: src/main.rs:537-575; daemon: 595-619 — thread-per-connection with no shared in-memory registry), and the check only bails when status==Running: a session in Starting (the entire spawn window, plus forever if a previous supervisor crashed pre-Running) is not protected at all. Two concurrent `start foo` (a manager-agent retry after the 5s wait timeout or a torn-metadata parse failure, parallel tool calls, or two agents) both pass the check: the second deletes the first's FIFO and truncates the logs mid-setup (lines 641-649, with a possible mkfifo EEXIST race between the two removes), and two supervisors/owner-threads each spawn a child. Result: two children of the same name; metadata records only the last writer's pids; both capture threads interleave bytes into the same raw.log/clean.log and alternately rewrite screen.txt with different vt100 states; sends reach only the instance holding the new FIFO; and `stop` kills only the recorded pids — the other child and its supervisor leak untracked and keep scribbling the logs, while both waiting clients report 'started' from whichever metadata won.
 
@@ -150,7 +150,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** stop_session_silent src/main.rs:1078
 - **Found by:** concurrency
-- **Status:** open
+- **Status:** fixed in `13cdda5` — supervise_pty aborts and kills the child if marked Stopped during startup.
 
 **Problem.** stop_session_silent (line 1078) kills only the pids currently in metadata and then marks Stopped — it never gates on status or prevents a future transition. If stop lands while the session is Starting (daemon mode: child_pid and supervisor_pid both None until line 743; direct mode: before run_supervisor writes its pid at 692), it kills nothing, reports 'stopped session' success, and writes Stopped; the owner thread/supervisor then proceeds to spawn the child and unconditionally sets status=Running (supervise_pty lines 740-743), resurrecting the session the manager believes is dead. Worse, the concurrently-waiting start client can load the transient Stopped and report 'session stopped while starting: stopped by user' — leaving a session the manager believes both failed and stopped, but which is actually running. In direct mode there is also a leak variant: stop kills the supervisor (line 1090) in the window after spawn_command returns but before child_pid is saved (lines 732-743); the child was setsid'd into its own process group, so kill(-supervisor) never reaches it and its pid was never recorded — an orphaned interactive child the tool can no longer stop.
 
@@ -161,7 +161,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** handle_daemon_stream src/main.rs:388 (shutdown_sessions_for_daemon src/main.rs:1032-1069)
 - **Found by:** concurrency, manual-read, security
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Shutdown includes Starting sessions; socket removed on exit.
 
 **Problem.** shutdown_sessions_for_daemon stops only sessions whose metadata says Running at scan time (src/main.rs:1032-1069); handle_daemon_stream then calls std::process::exit(0) (line 388), killing all daemon threads at arbitrary points. A Start racing the shutdown (child spawned after the scan, or status still Starting) is skipped by the scan and its owner thread is destroyed by exit(0): a live PTY child is orphaned with no FIFO reader, metadata is permanently stuck at Starting/Running, subsequent send fails ENXIO and status lies. Any concurrent Stop/Send thread killed inside save_metadata's truncate-write window leaves corrupt metadata.json on disk, and other connected clients get their sockets dropped mid-response ('daemon closed connection without a response') with no way to know whether their command applied. Inverse ordering bug: if writing the shutdown response fails (client gone), the `?` at line 381 returns before exit(0), leaving a daemon that already killed every session but keeps running.
 
@@ -172,7 +172,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** bridge_root src/main.rs:1222 (consumed by run_daemon src/main.rs:330 and initialize_session_files src/main.rs:637)
 - **Found by:** security
-- **Status:** open
+- **Status:** fixed in `c53d557` — AGENT_BRIDGE_HOME must be absolute; ensure_bridge_dir validates each component; O_NOFOLLOW.
 
 **Problem.** bridge_root() returns AGENT_BRIDGE_HOME unchecked, and run_daemon/initialize_session_files then create_dir_all it and File::create / fs::write inside it, all following symlinks. The README and design doc explicitly instruct `AGENT_BRIDGE_HOME=/private/tmp/agent-bridge-test`. In sticky world-writable /tmp, another local user can pre-create that path (or interior files like sessions/<name>/raw.log) as a symlink before the owner runs; create_dir_all/File::create/fs::write then follow the link, letting the attacker (a) own the directory the victim writes secret logs into and read them, or (b) redirect a log/screen/metadata write through a symlink to clobber a victim-writable file. Even with no symlink, an attacker-pre-created dir is attacker-owned yet used by the victim daemon.
 
@@ -183,7 +183,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** capture_output src/main.rs:794
 - **Found by:** unix-pty, errors, spec, manual-read
-- **Status:** open
+- **Status:** fixed in `e334802` — Persistent AnsiCleaner carries parser state across read chunks.
 
 **Problem.** capture_output calls strip_ansi_escapes::strip(chunk) per read; strip() constructs a fresh vte parser per call (verified in strip-ansi-escapes 0.2.1 source), so parser state is discarded between chunks. An escape sequence straddling the 8192-byte buffer boundary is half-dropped, half-emitted as literal text: a chunk ending '\x1b[38;5;2' is swallowed mid-parse and the next chunk's '40m' is written to clean.log as visible text. Claude Code and other TUI targets emit escape-dense multi-KB redraw bursts constantly, so chunk boundaries land inside sequences routinely, sprinkling fragments like '40m' and ';5;240m' through clean.log — the default source for `read` — misleading the manager agent that parses it and contradicting the doc's 'readable append-only text' claim.
 
@@ -194,7 +194,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** read_output_text src/main.rs:918-921
 - **Found by:** errors, manual-read
-- **Status:** open
+- **Status:** fixed in `ebba73f` — tail_file seeks backward in 64 KiB blocks with an 8 MiB cap.
 
 **Problem.** read_output_text reads the whole raw.log/clean.log into a String, then materializes a Vec<&str> of every line, just to print the last `tail` (default 300) lines. These logs grow without bound for the life of a session, and Claude-style TUIs rewrite the screen continuously, so raw.log reaches hundreds of MB within hours and GBs over days. Every `read` then allocates the entire file (twice: string plus line vector) — and in daemon mode this happens inside the durable daemon process on every poll of the manager's loop, with concurrent reads multiplying the spike: multi-second latencies, memory bloat, and eventual allocation failure/OOM kill of the daemon, which takes down every running session's ownership thread.
 
@@ -205,7 +205,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** supervise_pty src/main.rs:702 (doctor never daemon-routed: daemon_request_for_command src/main.rs:274)
 - **Found by:** protocol, concurrency
-- **Status:** open
+- **Status:** fixed in `dc2dbce` — Start request carries the client PATH; daemon resolves the command with it.
 
 **Problem.** supervise_pty resolves the program via path_with_local_bin(), which reads the PATH of the process it runs in — the daemon when sessions are daemon-owned — and CommandBuilder inherits the full daemon environment (src/main.rs:700-730). Meanwhile `doctor` is never routed through the daemon (daemon_request_for_command returns None, src/main.rs:274), so it inspects the CLIENT's PATH/env. Concrete scenario: the daemon was started from a plain Terminal session without nvm/homebrew init (or later via launchd); the user's iTerm shell has node and env vars (ANTHROPIC_*, custom PATH). `agent-bridge start dev --cmd "npm run dev"` fails with 'session stopped while starting: No such file or directory', or claude launches without the auth/env the user's shell has — yet `agent-bridge doctor` reports everything resolves fine, because it tested a different environment than the one that actually spawns the child.
 
@@ -216,7 +216,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** supervise_pty src/main.rs:763
 - **Found by:** unix-pty
-- **Status:** open
+- **Status:** fixed in `22e39b0` — Exit recorded as soon as the child is reaped; output drain capped at 2s.
 
 **Problem.** After child.wait() returns, supervise_pty blocks on output_thread.join(), but the PTY master only sees EOF once ALL slave fds close. Run `start sh --cmd sh`, type `sleep 1000 &` then `exit`: the shell dies, sleep inherits the slave as stdin/stdout/stderr, capture_output blocks in read() and the join hangs indefinitely. mark_stopped never runs, so status reports status=Running (child_alive=false) forever — a manager agent polling for completion waits forever. The doc's advertised targets (shells, dev servers, test watchers) routinely background children, and daemonizing dev servers trigger this; in daemon mode the session thread is also permanently wedged.
 
@@ -227,7 +227,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium (finder claimed high; adjusted at verification)
 - **Anchor:** save_metadata src/main.rs:1188
 - **Found by:** concurrency, unix-pty, security, errors, manual-read
-- **Status:** open
+- **Status:** fixed in `c0cad2a` — save_metadata writes via write_atomic (temp + rename).
 
 **Problem.** save_metadata uses fs::write — open(O_TRUNC) then write, two syscalls, no atomicity — while concurrent readers and writers exist by design with zero locks. (a) Every direct-mode start polls load_metadata every 100ms (wait_for_running_metadata, line 668) while the supervisor writes the file 2-3 times (lines 692, 743); a read landing in the truncate window gets empty/partial JSON and the `?` at line 668 aborts start with 'failed to parse metadata.json' even though the session started fine (the manager may then retry, feeding the duplicate-start race); the same transient failure hits send/status (lines 872, 961), and list/shutdown silently drop the session from results (lines 1002, 1045). (b) Every stop of a supervisor session has TWO concurrent mark_stopped writers — the stopper (line 1099, 'stopped by user') and the exiting supervisor (line 695, real exit status) — racing unsynchronized load-modify-write truncate+write pairs from independent fds: last writer wins, and interleaving can leave mixed-version, unparseable JSON persistently on disk. (c) stop SIGKILLs the supervisor (line 1090) possibly inside mark_stopped, and daemon Shutdown calls process::exit(0) while other threads may be mid-save_metadata; either can cut a write between truncate and write, leaving metadata.json empty/truncated forever — after which status/send/stop all fail for that session (and it vanishes from list) until it is re-started.
 
@@ -238,7 +238,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** capture_output src/main.rs:783-806
 - **Found by:** errors
-- **Status:** open
+- **Status:** fixed in `dc2dbce` — capture_output keeps draining the PTY on a sink write error; warns once per sink.
 
 **Problem.** capture_output returns Err on the first failed raw/clean/screen write — e.g. the disk fills overnight — and the thread exits, but nothing observes it: supervise_pty discards the result with `let _ = output_thread.join()` (src/main.rs:763) and joins only after child.wait(). With no reader draining the PTY master, the child blocks forever on its next write to a full PTY buffer, so child.wait() never returns either. Observable result: status/list report Running and child_alive=true indefinitely, `screen` and `read` serve stale content, no error is logged anywhere, and the manager agent waits on a session that can never make progress until someone runs stop. A single transient screen.txt write failure also takes down raw/clean logging because all three share one loop.
 
@@ -249,7 +249,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium (finder claimed high; adjusted at verification)
 - **Anchor:** stop_session_silent src/main.rs:1078-1099 (terminate_pid src/main.rs:1104, signal_pid_and_group src/main.rs:1137)
 - **Found by:** unix-pty, security, errors, manual-read, spec
-- **Status:** open
+- **Status:** fixed in `cba0519` — stop skips already-Stopped sessions and only signals PIDs verified by start-time token.
 
 **Problem.** stop_session_silent passes child_pid/supervisor_pid from metadata.json to terminate_pid -> signal_pid_and_group, which sends SIGTERM then SIGKILL to both kill(pid) and kill(-pid) — the entire process group — with no identity check and no status gate. Stale Running metadata is routine: daemon SIGKILL (daemon-owned sessions are never recovered on restart), supervisor crash, or reboot all skip mark_stopped. After PID reuse, a later `agent-bridge stop name` SIGKILLs an unrelated process and, via the -pid group signal, potentially an entire unrelated process group. If the recycled pid belongs to another user/root, kill returns EPERM: stop_session_silent bails BEFORE mark_stopped (src/main.rs:1095-1099) and process_alive treats EPERM as alive (src/main.rs:1311), so the session is stuck Running permanently — stop always fails, start of the same name is refused 'already running', recoverable only by hand-editing the session directory. Additionally, mark_stopped retains the pids and stop never checks status==Stopped, so stopping an already-exited session re-signals possibly-recycled pids, can report 'failed to stop session' for a session that is in fact stopped, and overwrites the real recorded exit_status with 'stopped by user'.
 
@@ -260,7 +260,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium (finder claimed high; adjusted at verification)
 - **Anchor:** read_output_text src/main.rs:918
 - **Found by:** unix-pty, errors, protocol, spec, manual-read
-- **Status:** open
+- **Status:** fixed in `ebba73f` — read uses tail_file with from_utf8_lossy.
 
 **Problem.** read_output_text uses fs::read_to_string on raw.log (exact PTY bytes, arbitrary) and clean.log (strip-ansi passes non-escape bytes through verbatim, so it is poisoned too). The first non-UTF-8 output — cat of a binary, git diff of a binary file, curl of a tarball, Latin-1 from a legacy tool, or a multibyte codepoint truncated mid-write/at kill — permanently poisons both append-only logs (no rotation): every subsequent `agent-bridge read NAME` and `read --raw`, direct or daemon-routed, fails with 'failed to read ... stream did not contain valid UTF-8' for the rest of the session's life. The manager agent loses all log access to a still-running session (only `screen` keeps working), and raw.log's documented exact-byte replay purpose is unmeetable through the CLI.
 
@@ -271,7 +271,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium (finder claimed high; adjusted at verification)
 - **Anchor:** validate_session_name src/main.rs:1199-1212 (session_dir src/main.rs:1303)
 - **Found by:** security, protocol, spec, manual-read
-- **Status:** open
+- **Status:** fixed in `68783fb` — validate_session_name rejects '.', '..', leading '-'; supervisor name passed behind '--'.
 
 **Problem.** validate_session_name accepts any mix of [A-Za-z0-9._-] (src/main.rs:1199-1212), so '.', '..', and leading-dash names all pass. session_dir('..') = ~/.agent-bridge itself and session_dir('.') = the sessions root (src/main.rs:1303-1306). Verified: `agent-bridge start . --cmd "echo dot"` created raw.log, clean.log, screen.txt, metadata.json, and input.fifo directly in $AGENT_BRIDGE_HOME/sessions/; '..' targets the bridge root next to the live daemon socket, where initialize_session_files deletes/recreates input.fifo and truncates root-level files, and stop/status/read operate on bridge-root state — breaking the per-session sandbox and the documented sessions/{name} layout (such sessions are also invisible to `list`, which only enumerates subdirectories). It cannot reach arbitrary paths ('/' is blocked), but it clobbers root-level state. Separately, a name like '-foo' works in daemon mode but breaks direct mode: start_session_detached re-spawns `current_exe supervisor -foo ...` (src/main.rs:550-557) and clap in the supervisor rejects '-foo' as an unknown flag, so the supervisor exits instantly with stderr nulled, the client times out 'did not report running within 5 seconds', and metadata is stuck at Starting — the same name behaves differently depending on whether the daemon is up.
 
@@ -282,7 +282,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** capture_output src/main.rs:801
 - **Found by:** concurrency, unix-pty, spec, manual-read, errors, security
-- **Status:** open
+- **Status:** fixed in `c0cad2a` — screen.txt snapshot written via write_atomic.
 
 **Problem.** capture_output calls fs::write(screen.txt) after every <=8KB read chunk (line 801) — open(O_TRUNC) then write, potentially dozens of times per second during active output — while read_screen_text (line 941) in another process does an uncoordinated read_to_string. A read landing between truncate and write successfully returns an empty or partial screen. This is the highest-frequency non-atomic-write race in the codebase and hits the primary documented use case directly: a manager AI polling `screen` during Claude streaming to decide whether the session is idle or awaiting approval intermittently observes a blank/truncated snapshot and acts on it (concludes the session is hung or dead, re-sends a prompt). The full-screen serialize+write per chunk is also wasted work under heavy output.
 
@@ -293,7 +293,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** medium
 - **Anchor:** write_session_bytes src/main.rs:884
 - **Found by:** concurrency, unix-pty, errors, protocol, spec, manual-read
-- **Status:** open
+- **Status:** fixed in `d874363` — FIFO O_NONBLOCK cleared before write so large sends block until fully delivered.
 
 **Problem.** write_session_bytes opens input.fifo O_WRONLY|O_NONBLOCK (line 880) and calls write_all (line 884); std's write_all does not retry WouldBlock. The FIFO holds ~16-64KB and forward_input drains it at the child's pace through the small PTY input queue, so a large send (multi-KB pasted diff/prompt — the tool's core Phase-2 use case) to a busy or non-reading child (REPL computing, dev server that never reads stdin, child suspended via `keys ctrl-z`) fills the buffer and write returns EAGAIN after partial progress: the CLI errors 'failed to write input' (with no byte count) AFTER an arbitrary prefix was already delivered, the child executes truncated input without the trailing \r, and the natural manager retry delivers the prefix twice. Pipe writes are atomic only up to PIPE_BUF (512 bytes on macOS), so two concurrent senders (two daemon threads, or daemon thread + --direct CLI) with larger payloads can also interleave bytes mid-message, splicing two prompts together.
 
@@ -304,7 +304,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** doctor src/main.rs:469-477
 - **Found by:** critic
-- **Status:** open
+- **Status:** fixed in `bc06198` — doctor derives warnings from observed behavior, not hardcoded install paths.
 
 **Problem.** doctor's warning logic encodes one specific machine's history: it warns whenever the resolved claude path is not ~/.local/bin/claude ("known-good local Claude path was ~/.local/bin/claude in this environment; resolved path differs", src/main.rs:475-477) and flags /opt/homebrew/bin/claude based on a past local incident (src/main.rs:469-474). On any standard installation where claude legitimately lives elsewhere (npm -g at /usr/local/bin/claude, a Homebrew install, or the planned Linux target where /opt/homebrew never exists but ~/.local/bin may not be used), a perfectly working setup is reported with warnings every single run. Since doctor's whole job is to be the trustworthy diagnostic -- and its consumer is often the manager AI deciding whether the environment is healthy -- persistent spurious warnings cause wrong conclusions and wasted debugging, and train users to ignore the warnings section entirely. Note doctor also already runs `claude --version` through the resolved path (src/main.rs:484-491), which provides the actual health signal these heuristics try to guess at.
 
@@ -315,7 +315,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low (finder claimed medium; adjusted at verification)
 - **Anchor:** handle_daemon_stream src/main.rs:371 (accept/spawn loop run_daemon src/main.rs:350)
 - **Found by:** security, manual-read
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Handler sets 30s timeouts and caps the request line at 1 MiB.
 
 **Problem.** run_daemon accepts each connection and thread::spawn's a handler with no cap; handle_daemon_stream does a single read_line with no timeout and no length bound. A local process that can reach the socket can (a) open many connections and never send a newline — each handler blocks forever in read_line, permanently pinning one thread per connection until the daemon exhausts threads/FDs/memory, or (b) send one enormous line with no \n, making read_line buffer it unbounded into memory (OOM). Either takes down the daemon and thus the control plane for all of the user's sessions. The socket's 0600 perms limit the attacker to the same user today, but the protocol is otherwise unauthenticated, so any same-user process (e.g. a compromised dependency) suffices.
 
@@ -326,7 +326,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** run_daemon src/main.rs:333
 - **Found by:** concurrency, manual-read
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Daemon holds a lifetime flock on daemon.lock.
 
 **Problem.** run_daemon does exists -> connect-probe -> remove_file -> bind as four separate steps (lines 333-342). Two `agent-bridge daemon` invocations racing after a crash (stale socket present) both fail the connect probe, both decide the socket is stale; D1 removes and binds (now live), then D2 — which already passed its probe — removes D1's freshly bound socket file and binds its own. D1 keeps running and 'listening' on an unlinked inode forever: a silent zombie daemon process that no client can ever reach, while clients talk to D2. The probe can also hit D1 between bind and listen and read ECONNREFUSED, with the same takeover result. The daemon additionally never removes its socket on shutdown (exit(0) at line 388), guaranteeing every restart exercises this stale-socket path.
 
@@ -337,7 +337,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** supervise_pty src/main.rs:738
 - **Found by:** unix-pty
-- **Status:** open
+- **Status:** fixed in `a9c5604` — supervise_pty reaps the child on any post-spawn failure.
 
 **Problem.** In supervise_pty, any error after spawn_command but before child.wait() — e.g. load_metadata at line 738 hitting a torn metadata write from the polling client, or try_clone_reader/take_writer failing — returns early without ever waiting on the child. In direct mode the supervisor exits and init reaps; in the daemon the child stays a child of the daemon process forever. When it eventually exits it becomes a permanent zombie: kill(pid, 0) succeeds on zombies so process_alive=true, SIGTERM/SIGKILL are accepted but do nothing, and terminate_pid bails 'process did not exit after SIGTERM and SIGKILL' — `stop` fails forever for that session and `shutdown` (which bails if any Running session fails to stop) refuses to exit the daemon.
 
@@ -348,7 +348,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** wait_for_running_metadata src/main.rs:683
 - **Found by:** errors
-- **Status:** open
+- **Status:** fixed in `13cdda5` — Start timeout terminates the in-flight supervisor/child and marks Stopped.
 
 **Problem.** wait_for_running_metadata polls 50x100ms and bails with 'did not report running within 5 seconds' — but by then the setsid'd supervisor (or daemon thread) has already been spawned and is not cleaned up on this path. Under load or slow disk/binary resolution the session then transitions to Running moments later: the user was told start failed, yet `list` shows it Running and a retry of the same start either errors 'already running' or, if it lands while status is still Starting, re-initializes the files under the live supervisor (feeding the duplicate-spawn race). The timeout expiring mid-operation leaves orphaned in-flight state instead of converging to either success or a cleaned-up failure.
 
@@ -359,7 +359,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** handle_daemon_request src/main.rs:431
 - **Found by:** errors
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Daemon serializes the full anyhow chain; load_metadata maps missing to "no such session".
 
 **Problem.** handle_daemon_request serializes failures with error.to_string(), which for anyhow errors yields only the outermost context: a status/read of a nonexistent session returns just 'failed to read /Users/x/.agent-bridge/sessions/NAME/metadata.json' with the 'No such file or directory' cause stripped, indistinguishable from a permission problem or torn write; a send to a dead session returns 'failed to open input FIFO for NAME' without the ENXIO that explains the reader is gone. Since most commands auto-route through the daemon, this is the error UX the manager agent normally sees, and nothing anywhere says plainly 'no such session NAME'.
 
@@ -370,7 +370,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** handle_daemon_stream src/main.rs:377
 - **Found by:** protocol
-- **Status:** open
+- **Status:** fixed in `a9c5604` — Malformed/unknown requests get a DaemonResponse error instead of a dropped connection.
 
 **Problem.** handle_daemon_stream bails on read/parse failure BEFORE writing any DaemonResponse (src/main.rs:370-378); the error goes to the daemon's stderr and the stream drops, so the client's read_line gets EOF and reports the generic 'daemon closed connection without a response' (src/main.rs:301-302). Concrete scenario (version skew): the user rebuilds/upgrades agent-bridge while an old daemon is still running; the new CLI sends a request variant or tag the old daemon's serde enum rejects, and every command fails with that unexplained message until the user guesses to restart the daemon. The same applies to the planned MCP adapter or any hand-written client sending slightly wrong JSON — the protocol gives them zero diagnostic. (The daemon's own startup liveness probe also triggers a spurious 'empty daemon request' stderr line via this path.)
 
@@ -381,7 +381,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** Commands::Send src/main.rs:65
 - **Found by:** protocol
-- **Status:** open
+- **Status:** fixed in `bc06198` — Send text takes allow_hyphen_values.
 
 **Problem.** The Send `text` positional has no allow_hyphen_values (src/main.rs:62-70), so clap treats leading-dash text as an option. Concrete scenario: the manager agent drives a Python REPL and runs `agent-bridge send py "-1 + 2"`, or sends `--help`/`-v` to a CLI under test; clap exits code 2 with 'unexpected argument' and nothing reaches the session. The `--` escape works but an AI client has no reason to know it's required, and for a tool whose whole job is forwarding arbitrary text this is a recurring trap.
 
@@ -392,7 +392,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** Commands::Send src/main.rs:69 (doc: docs/AGENT-BRIDGE.md:375)
 - **Found by:** spec
-- **Status:** open
+- **Status:** fixed in docs (Phase 4) — Design-doc example corrected to drop the nonexistent --enter flag (Phase 4).
 
 **Problem.** docs/AGENT-BRIDGE.md line 375 ('Command Surface — Initial service-era CLI') shows `agent-bridge send claude "Review the failing tests." --enter`. Verified: this exits 2 with "unexpected argument '--enter' found". The CLI only defines --no-enter (Enter is appended by default), so the one documented send example in the command-surface block fails if pasted, while every other command in that block parses as written.
 
@@ -403,7 +403,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** bridge_root src/main.rs:1222 (doc: README.md:20-29)
 - **Found by:** spec
-- **Status:** open
+- **Status:** fixed in docs (Phase 4) — README quickstart uses one consistent AGENT_BRIDGE_HOME across daemon and clients (Phase 4).
 
 **Problem.** README.md line 20 starts the daemon under AGENT_BRIDGE_HOME=/private/tmp/agent-bridge-test, but the following client commands (start/send/read/.../shutdown, lines 21-29) use the default home. Since the socket path derives from bridge_root, those clients look for ~/.agent-bridge/agent-bridge.sock, never find the test daemon, and silently run in direct mode under ~/.agent-bridge; the final `shutdown` prints 'daemon not running' while the test daemon keeps running. The block therefore contradicts the adjacent claim 'When a daemon is reachable, normal session commands route through its Unix socket' — a user following it verbatim tests the supervisor path while believing they tested the daemon.
 
@@ -414,7 +414,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** wait_for_running_metadata src/main.rs:672
 - **Found by:** spec
-- **Status:** open
+- **Status:** fixed in `ef03adc` — Numeric exit code recorded; a clean exit-0 fast finish reports success.
 
 **Problem.** wait_for_running_metadata first sleeps 100ms; any command that finishes before the first poll is seen as Stopped and start bails. Verified: `agent-bridge start hi --cmd "echo hello"` exits 1 with "session 'hi' stopped while starting: ExitStatus { code: 0, signal: None }" even though clean.log captured 'hello'. The verified-so-far claim '`claude --version` works under the PTY' (Phase-0 acceptance) only holds because node startup exceeds 100ms — success of the documented acceptance test is timing-dependent, and any sub-100ms command yields a misleading error despite correct capture.
 
@@ -425,7 +425,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** initialize_session_files src/main.rs:647
 - **Found by:** spec
-- **Status:** open
+- **Status:** fixed in `bc06198` — Restart rotates prior raw/clean logs to a .prev generation; command parsed before truncation.
 
 **Problem.** initialize_session_files uses File::create, which truncates raw.log, clean.log, and screen.txt whenever start reuses an existing name. A user who stops 'claude-main' on Friday and starts it again Monday loses the entire prior transcript, although the docs present raw.log as 'exact PTY bytes for replay/debugging' and Phase-3 acceptance expects restarts not to corrupt existing logs; neither README nor the design doc mentions truncation anywhere. Undocumented destruction of the artifact the docs tell users to rely on for replay.
 
@@ -436,7 +436,7 @@ Roadmap gaps the design doc already acknowledges (resize, idle detection, MCP ad
 - **Severity:** low
 - **Anchor:** supervise_pty src/main.rs:738-758 (write_session_bytes src/main.rs:877-882)
 - **Found by:** manual-read, concurrency, unix-pty
-- **Status:** open
+- **Status:** fixed in `d874363` — FIFO reader opened before the session is published Running.
 
 **Problem.** supervise_pty saves status=Running (src/main.rs:743) BEFORE the input-forwarder thread is spawned and opens the FIFO (src/main.rs:758/810). A send issued immediately after start observes status==Running, opens input.fifo O_WRONLY|O_NONBLOCK, and fails with ENXIO ('failed to open input FIFO') because no reader has the FIFO open yet. The same confusing ENXIO also appears whenever the owner died leaving stale Running metadata, making it ambiguous whether the session is starting or dead.
 
@@ -463,42 +463,42 @@ The single fact this hinges on is whether macOS checks read vs write at connect:
 
 ## Resolution log
 
-Filled in as fixes land; each confirmed finding gets a resolution commit or an explicit wontfix rationale.
+All 35 confirmed findings are resolved: 33 in code (commits below) and 2 (m28, m29) as documentation corrections during the docs phase.
 
 | ID | Resolution | Commit |
 |----|------------|--------|
-| m1 | — | — |
-| m3 | — | — |
-| m4 | — | — |
-| c1 | — | — |
-| c2 | — | — |
-| c3 | — | — |
-| m10 | — | — |
-| m11 | — | — |
-| m12 | — | — |
-| m13 | — | — |
-| m14 | — | — |
-| m16 | — | — |
-| m17 | — | — |
-| m18 | — | — |
-| m19 | — | — |
-| m2 | — | — |
-| m20 | — | — |
-| m5 | — | — |
-| m6 | — | — |
-| m7 | — | — |
-| m8 | — | — |
-| m9 | — | — |
-| c4 | — | — |
-| m15 | — | — |
-| m21 | — | — |
-| m22 | — | — |
-| m24 | — | — |
-| m25 | — | — |
-| m26 | — | — |
-| m27 | — | — |
-| m28 | — | — |
-| m29 | — | — |
-| m30 | — | — |
-| m31 | — | — |
-| m32 | — | — |
+| m1 | Dirs created 0700, logs/metadata/screen 0600 via ensure_private_dir/create_private_file. | `c53d557` |
+| m3 | Client resolves --cwd to an absolute path before routing to the daemon. | `a3c417f` |
+| m4 | forward_input polls a stop flag; supervise_pty joins it on child exit, releasing fds/thread. | `22e39b0` |
+| c1 | AnsiCleaner preserves tabs and normalizes CR to newline. | `e334802` |
+| c2 | Liveness gated on PID + start-time token, so a reused PID no longer blocks start or misreports status. | `cba0519` |
+| c3 | Client sets a 60s socket timeout with a clear "daemon suspended/wedged" error. | `a9c5604` |
+| m10 | Shared session_is_active checks supervisor AND child PID in both start paths. | `cba0519` |
+| m11 | Per-session flock on start.lock held through wait_for_running_metadata. | `13cdda5` |
+| m12 | supervise_pty aborts and kills the child if marked Stopped during startup. | `13cdda5` |
+| m13 | Shutdown includes Starting sessions; socket removed on exit. | `a9c5604` |
+| m14 | AGENT_BRIDGE_HOME must be absolute; ensure_bridge_dir validates each component; O_NOFOLLOW. | `c53d557` |
+| m16 | Persistent AnsiCleaner carries parser state across read chunks. | `e334802` |
+| m17 | tail_file seeks backward in 64 KiB blocks with an 8 MiB cap. | `ebba73f` |
+| m18 | Start request carries the client PATH; daemon resolves the command with it. | `dc2dbce` |
+| m19 | Exit recorded as soon as the child is reaped; output drain capped at 2s. | `22e39b0` |
+| m2 | save_metadata writes via write_atomic (temp + rename). | `c0cad2a` |
+| m20 | capture_output keeps draining the PTY on a sink write error; warns once per sink. | `dc2dbce` |
+| m5 | stop skips already-Stopped sessions and only signals PIDs verified by start-time token. | `cba0519` |
+| m6 | read uses tail_file with from_utf8_lossy. | `ebba73f` |
+| m7 | validate_session_name rejects '.', '..', leading '-'; supervisor name passed behind '--'. | `68783fb` |
+| m8 | screen.txt snapshot written via write_atomic. | `c0cad2a` |
+| m9 | FIFO O_NONBLOCK cleared before write so large sends block until fully delivered. | `d874363` |
+| c4 | doctor derives warnings from observed behavior, not hardcoded install paths. | `bc06198` |
+| m15 | Handler sets 30s timeouts and caps the request line at 1 MiB. | `a9c5604` |
+| m21 | Daemon holds a lifetime flock on daemon.lock. | `a9c5604` |
+| m22 | supervise_pty reaps the child on any post-spawn failure. | `a9c5604` |
+| m24 | Start timeout terminates the in-flight supervisor/child and marks Stopped. | `13cdda5` |
+| m25 | Daemon serializes the full anyhow chain; load_metadata maps missing to "no such session". | `a9c5604` |
+| m26 | Malformed/unknown requests get a DaemonResponse error instead of a dropped connection. | `a9c5604` |
+| m27 | Send text takes allow_hyphen_values. | `bc06198` |
+| m28 | Design-doc example corrected to drop the nonexistent --enter flag (Phase 4). | docs |
+| m29 | README quickstart uses one consistent AGENT_BRIDGE_HOME across daemon and clients (Phase 4). | docs |
+| m30 | Numeric exit code recorded; a clean exit-0 fast finish reports success. | `ef03adc` |
+| m31 | Restart rotates prior raw/clean logs to a .prev generation; command parsed before truncation. | `bc06198` |
+| m32 | FIFO reader opened before the session is published Running. | `d874363` |

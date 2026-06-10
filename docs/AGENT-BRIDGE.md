@@ -55,6 +55,15 @@ Implemented:
 - `shutdown` asks the daemon to stop running sessions and exit.
 - `doctor` reports storage paths, command resolution, PATH ordering, and Claude
   version comparisons.
+
+Hardening added after the 2026-06-10 adversarial review (see
+`CODE-REVIEW-2026-06-10.md`): owner-only permissions on all session artifacts;
+atomic metadata/screen writes; client-side `--cwd` and `PATH` resolution for
+daemon sessions; bounded, non-UTF-8-safe `read`; a stateful ANSI cleaner that
+preserves tabs and survives chunk boundaries; per-session start locks and a
+daemon singleton lock; PID-reuse-safe liveness via process start-time tokens;
+daemon request timeouts and size limits; and input/forwarder fd lifecycle fixes.
+
 - Session files are stored under:
 
 ```text
@@ -65,10 +74,12 @@ Implemented:
 ~/.agent-bridge/sessions/{session-name}/input.fifo
 ```
 
-`AGENT_BRIDGE_HOME` can override the storage root for tests:
+`AGENT_BRIDGE_HOME` can override the storage root for tests. Use a private
+per-user directory (it must be an absolute path; symlinked or foreign-owned
+roots are rejected), not a shared location like `/tmp/agent-bridge`:
 
 ```bash
-AGENT_BRIDGE_HOME=/private/tmp/agent-bridge-test ./target/debug/agent-bridge list
+AGENT_BRIDGE_HOME="$(mktemp -d)" ./target/debug/agent-bridge list
 ```
 
 Verified so far:
@@ -302,10 +313,14 @@ Backspace, Delete, arrows, Home, and End.
 
 Goal: replace per-session hidden supervisors with one durable service.
 
-Status: started. The daemon accepts line-delimited JSON requests over a local
-Unix socket and can own PTY sessions directly. CLI commands opportunistically
-route through the daemon when the socket is reachable, and fall back to direct
-execution when it is not.
+Status: largely done and hardened. The daemon accepts line-delimited JSON
+requests over a local Unix socket and owns PTY sessions directly. CLI commands
+opportunistically route through the daemon when the socket is reachable, and
+fall back to direct execution when it is not. Post-review hardening added a
+daemon singleton lock, per-request read/write timeouts and a request-size cap,
+error responses for malformed requests, client-side `cwd`/`PATH` resolution,
+socket cleanup on shutdown, and `Starting`-session handling on shutdown.
+Remaining: recovery of daemon-owned sessions across a daemon restart.
 
 Scope:
 
@@ -372,7 +387,8 @@ Initial service-era CLI:
 agent-bridge daemon
 agent-bridge doctor --cmd claude --cwd /path/to/repo
 agent-bridge start claude --cwd /path/to/repo --cmd claude
-agent-bridge send claude "Review the failing tests." --enter
+agent-bridge send claude "Review the failing tests."
+agent-bridge send claude "no trailing newline" --no-enter
 agent-bridge keys claude ctrl-c
 agent-bridge screen claude --tail 120
 agent-bridge read claude --tail 300
