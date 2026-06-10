@@ -56,6 +56,10 @@ pub struct SessionMetadata {
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
     pub exit_status: Option<String>,
+    /// Numeric exit code once the process has exited, used to distinguish a
+    /// clean fast exit (a command that ran to completion) from a start failure.
+    #[serde(default)]
+    pub exit_code: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,7 +72,7 @@ pub enum SessionStatus {
 
 pub fn start_session(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Result<()> {
     let metadata = start_session_detached(name, cwd, cmd)?;
-    print!("{}", format_started_session(&metadata));
+    print!("{}", format_start_result(&metadata));
     Ok(())
 }
 
@@ -131,6 +135,23 @@ pub fn start_session_detached(
     wait_for_running_metadata(name)
 }
 
+/// Render the result of a start request: a normal "started" line for a running
+/// session, or a "ran to completion" line for a command that finished before it
+/// could be reported as running (e.g. `echo`).
+pub fn format_start_result(metadata: &SessionMetadata) -> String {
+    if metadata.status == SessionStatus::Stopped {
+        match metadata.exit_code {
+            Some(code) => format!(
+                "session '{}' ran to completion (exit code {code})\n",
+                metadata.name
+            ),
+            None => format!("session '{}' finished\n", metadata.name),
+        }
+    } else {
+        format_started_session(metadata)
+    }
+}
+
 pub fn format_started_session(metadata: &SessionMetadata) -> String {
     format!(
         "started session '{}' (supervisor pid: {}, child pid: {})\n",
@@ -191,6 +212,7 @@ pub fn initialize_session_files(name: &str, cwd: &Path, cmd: &str) -> Result<()>
         created_at_unix: now_unix(),
         updated_at_unix: now_unix(),
         exit_status: None,
+        exit_code: None,
     };
     save_metadata(&metadata)
 }
@@ -203,6 +225,11 @@ pub fn wait_for_running_metadata(name: &str) -> Result<SessionMetadata> {
             return Ok(metadata);
         }
         if metadata.status == SessionStatus::Stopped {
+            // A command that simply ran fast and exited cleanly is a success,
+            // not a start failure.
+            if metadata.exit_code == Some(0) {
+                return Ok(metadata);
+            }
             bail!(
                 "session '{}' stopped while starting: {}",
                 name,
@@ -223,7 +250,7 @@ pub fn wait_for_running_metadata(name: &str) -> Result<SessionMetadata> {
             let _ = terminate_pid(pid as i32);
         }
     }
-    let _ = mark_stopped(name, Some("start timed out".to_string()));
+    let _ = mark_stopped(name, Some("start timed out".to_string()), None);
     bail!("session '{name}' did not report running within 5 seconds");
 }
 
@@ -238,12 +265,12 @@ pub fn run_supervisor(name: &str, cwd: &Path, cmd: &str) -> Result<()> {
     save_metadata(&metadata)?;
 
     match supervise_pty(name, cwd, cmd) {
-        Ok(exit_status) => mark_stopped(name, Some(exit_status)),
-        Err(error) => mark_stopped(name, Some(error.to_string())),
+        Ok((exit_status, exit_code)) => mark_stopped(name, Some(exit_status), exit_code),
+        Err(error) => mark_stopped(name, Some(error.to_string()), None),
     }
 }
 
-pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
+pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<(String, Option<u32>)> {
     let mut command_parts = parse_command(cmd)?;
     let path = path_with_local_bin();
     if let Some(path) = &path {
@@ -327,6 +354,7 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
         thread::spawn(move || forward_input(input_fifo, &mut input_writer, &input_stop));
 
     let exit_status = child.wait().context("failed while waiting for child")?;
+    let exit_code = Some(exit_status.exit_code());
 
     // Stop and join the input forwarder so its thread, FIFO fd, and dup'd PTY
     // master writer are released instead of leaking for the daemon's lifetime.
@@ -342,7 +370,7 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<String> {
         thread::sleep(Duration::from_millis(20));
     }
 
-    Ok(format!("{exit_status:?}"))
+    Ok((format!("{exit_status:?}"), exit_code))
 }
 
 pub fn send_input(name: &str, text: &str, no_enter: bool) -> Result<()> {
@@ -567,7 +595,7 @@ pub fn stop_session_silent(name: &str) -> Result<()> {
         bail!("failed to stop session '{}': {}", name, errors.join("; "));
     }
 
-    mark_stopped(name, Some("stopped by user".to_string()))?;
+    mark_stopped(name, Some("stopped by user".to_string()), None)?;
 
     Ok(())
 }
@@ -620,11 +648,12 @@ pub fn signal_pid_and_group(pid: i32, signal: Signal) -> Result<bool> {
     Ok(sent)
 }
 
-pub fn mark_stopped(name: &str, exit_status: Option<String>) -> Result<()> {
+pub fn mark_stopped(name: &str, exit_status: Option<String>, exit_code: Option<u32>) -> Result<()> {
     let mut metadata = load_metadata(name)?;
     metadata.status = SessionStatus::Stopped;
     metadata.updated_at_unix = now_unix();
     metadata.exit_status = exit_status;
+    metadata.exit_code = exit_code;
     save_metadata(&metadata)
 }
 

@@ -18,7 +18,7 @@ use crate::{
     },
     protocol::{try_send_daemon_request, DaemonRequest, DaemonResponse},
     session::{
-        acquire_start_lock, format_started_session, initialize_session_files, list_sessions_text,
+        acquire_start_lock, format_start_result, initialize_session_files, list_sessions_text,
         load_metadata, mark_stopped, read_output_text, read_screen_text, send_input_silent,
         send_keys_silent, session_is_active, status_text, stop_session_silent, supervise_pty,
         wait_for_running_metadata, SessionMetadata, SessionStatus,
@@ -94,7 +94,7 @@ fn handle_daemon_stream(mut stream: UnixStream) -> Result<()> {
 fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
     let result = match request {
         DaemonRequest::Start { name, cwd, cmd } => start_session_in_daemon(&name, cwd, &cmd)
-            .map(|metadata| format_started_session(&metadata)),
+            .map(|metadata| format_start_result(&metadata)),
         DaemonRequest::Send {
             name,
             text,
@@ -155,12 +155,12 @@ fn start_session_in_daemon(name: &str, cwd: Option<PathBuf>, cmd: &str) -> Resul
     let thread_cwd = cwd;
     let thread_cmd = cmd.to_string();
     thread::spawn(move || {
-        let exit_status = match supervise_pty(&thread_name, &thread_cwd, &thread_cmd) {
-            Ok(exit_status) => exit_status,
-            Err(error) => error.to_string(),
+        let (exit_status, exit_code) = match supervise_pty(&thread_name, &thread_cwd, &thread_cmd) {
+            Ok((exit_status, exit_code)) => (exit_status, exit_code),
+            Err(error) => (error.to_string(), None),
         };
 
-        if let Err(error) = mark_stopped(&thread_name, Some(exit_status)) {
+        if let Err(error) = mark_stopped(&thread_name, Some(exit_status), exit_code) {
             eprintln!("failed to mark session '{thread_name}' stopped: {error:#}");
         }
     });
