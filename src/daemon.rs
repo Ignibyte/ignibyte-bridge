@@ -2,19 +2,20 @@
 
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::fs::PermissionsExt,
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     thread,
+    time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
 
 use crate::{
     paths::{
-        bridge_root, ensure_bridge_dir, ensure_private_dir, resolve_cwd, session_dir,
-        sessions_root, socket_path, validate_session_name,
+        bridge_root, create_private_file, ensure_bridge_dir, ensure_private_dir, resolve_cwd,
+        session_dir, sessions_root, socket_path, validate_session_name,
     },
     protocol::{try_send_daemon_request, DaemonRequest, DaemonResponse},
     session::{
@@ -25,9 +26,22 @@ use crate::{
     },
 };
 
+/// Maximum bytes accepted for a single request line before the daemon gives up,
+/// so a client that never sends a newline cannot make read_line buffer without
+/// bound.
+const MAX_REQUEST_BYTES: u64 = 1 << 20;
+/// How long a connected client has to send its request / receive its response
+/// before the handler thread gives up, so an idle client cannot pin a thread.
+const DAEMON_IO_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub fn run_daemon() -> Result<()> {
     let root = bridge_root()?;
     ensure_private_dir(&root)?;
+
+    // Hold an exclusive lock for the daemon's lifetime so two daemons cannot
+    // race the stale-socket check/remove/bind and unlink each other's socket.
+    // flock is released automatically when the process exits, covering crashes.
+    let _daemon_lock = acquire_daemon_lock(&root)?;
 
     let path = socket_path()?;
     if path.exists() {
@@ -60,34 +74,87 @@ pub fn run_daemon() -> Result<()> {
     Ok(())
 }
 
+/// Acquire the daemon-lifetime lock on `<root>/daemon.lock`.
+fn acquire_daemon_lock(root: &std::path::Path) -> Result<fs::File> {
+    use std::os::unix::io::AsRawFd;
+
+    let lock = create_private_file(&root.join("daemon.lock"))
+        .context("failed to open daemon lock")?;
+    // SAFETY: the fd is valid and owned by `lock` for the duration of the call.
+    let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        let error = std::io::Error::last_os_error();
+        if matches!(error.raw_os_error(), Some(libc::EWOULDBLOCK)) {
+            bail!("another agent-bridge daemon is already running or starting");
+        }
+        return Err(error).context("failed to lock daemon");
+    }
+    Ok(lock)
+}
+
 fn handle_daemon_stream(mut stream: UnixStream) -> Result<()> {
+    // Bound how long an idle or slow client can hold this handler thread.
+    stream
+        .set_read_timeout(Some(DAEMON_IO_TIMEOUT))
+        .context("failed to set read timeout")?;
+    stream
+        .set_write_timeout(Some(DAEMON_IO_TIMEOUT))
+        .context("failed to set write timeout")?;
+
     let mut reader = BufReader::new(
         stream
             .try_clone()
-            .context("failed to clone daemon stream")?,
+            .context("failed to clone daemon stream")?
+            .take(MAX_REQUEST_BYTES),
     );
     let mut line = String::new();
-    reader
+    let read = reader
         .read_line(&mut line)
         .context("failed to read daemon request")?;
-    if line.is_empty() {
-        bail!("empty daemon request");
+
+    // A zero-byte read is a bare connect-and-close (e.g. the startup liveness
+    // probe); answer nothing and move on rather than logging a spurious error.
+    if read == 0 {
+        return Ok(());
     }
 
-    let request: DaemonRequest =
-        serde_json::from_str(&line).context("failed to parse daemon request")?;
+    let request: DaemonRequest = match serde_json::from_str(&line) {
+        Ok(request) => request,
+        Err(error) => {
+            // Reply with the parse error instead of dropping the connection, so
+            // a client (or a version-skewed build) sees why, not a bare EOF.
+            let response = DaemonResponse {
+                ok: false,
+                output: String::new(),
+                error: Some(format!("invalid daemon request: {error}")),
+            };
+            write_daemon_response(&mut stream, &response)?;
+            return Ok(());
+        }
+    };
+
     let shutdown_requested = matches!(request, DaemonRequest::Shutdown);
     let response = handle_daemon_request(request);
-    serde_json::to_writer(&mut stream, &response).context("failed to write daemon response")?;
+    write_daemon_response(&mut stream, &response)?;
+
+    if shutdown_requested && response.ok {
+        // Remove the socket so a clean restart does not depend on the
+        // stale-socket cleanup path. The daemon lock releases on exit.
+        if let Ok(path) = socket_path() {
+            let _ = fs::remove_file(path);
+        }
+        std::process::exit(0);
+    }
+
+    Ok(())
+}
+
+fn write_daemon_response(stream: &mut UnixStream, response: &DaemonResponse) -> Result<()> {
+    serde_json::to_writer(&mut *stream, response).context("failed to write daemon response")?;
     stream
         .write_all(b"\n")
         .context("failed to finish daemon response")?;
     stream.flush().context("failed to flush daemon response")?;
-
-    if shutdown_requested && response.ok {
-        std::process::exit(0);
-    }
-
     Ok(())
 }
 
@@ -125,10 +192,12 @@ fn handle_daemon_request(request: DaemonRequest) -> DaemonResponse {
             output,
             error: None,
         },
+        // `{:#}` includes the full anyhow cause chain so the client sees the
+        // root cause (e.g. "no such session", ENXIO) not just the outer context.
         Err(error) => DaemonResponse {
             ok: false,
             output: String::new(),
-            error: Some(error.to_string()),
+            error: Some(format!("{error:#}")),
         },
     }
 }
@@ -182,7 +251,12 @@ fn shutdown_sessions_for_daemon() -> Result<String> {
         if entry.file_type()?.is_dir() {
             let name = entry.file_name().to_string_lossy().to_string();
             if let Ok(metadata) = load_metadata(&name) {
-                if metadata.status == SessionStatus::Running {
+                // Include Starting sessions, not only Running ones, so a session
+                // mid-startup is not orphaned when the daemon exits.
+                if matches!(
+                    metadata.status,
+                    SessionStatus::Running | SessionStatus::Starting
+                ) {
                     sessions.push(metadata.name);
                 }
             }

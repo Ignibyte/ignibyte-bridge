@@ -308,69 +308,76 @@ pub fn supervise_pty(name: &str, cwd: &Path, cmd: &str) -> Result<(String, Optio
         .context("failed to spawn command in PTY")?;
     drop(pair.slave);
 
-    // Open the FIFO reader before publishing the session as Running, so a send
-    // that races the start always finds a reader (no ENXIO window). O_RDWR keeps
-    // a write end open so the read side never sees EOF; O_NONBLOCK lets
-    // forward_input poll the stop flag.
-    let input_fifo_path = session_dir.join(INPUT_FIFO);
-    let input_fifo = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(&input_fifo_path)
-        .with_context(|| format!("failed to open {}", input_fifo_path.display()))?;
+    let master = pair.master;
+    let outcome = (|| -> Result<(String, Option<u32>)> {
+        // Open the FIFO reader before publishing the session as Running, so a
+        // send that races the start always finds a reader (no ENXIO window).
+        // O_RDWR keeps a write end open so the read side never sees EOF;
+        // O_NONBLOCK lets forward_input poll the stop flag.
+        let input_fifo_path = session_dir.join(INPUT_FIFO);
+        let input_fifo = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&input_fifo_path)
+            .with_context(|| format!("failed to open {}", input_fifo_path.display()))?;
 
-    let mut metadata = load_metadata(name)?;
-    // A stop that landed during startup marked the session Stopped before any
-    // PID was recorded. Honor it: kill the child we just spawned instead of
-    // resurrecting the session by promoting it to Running.
-    if metadata.status == SessionStatus::Stopped {
+        let mut metadata = load_metadata(name)?;
+        // A stop that landed during startup marked the session Stopped before
+        // any PID was recorded. Honor it instead of resurrecting the session by
+        // promoting it to Running (the child is reaped by the outer guard).
+        if metadata.status == SessionStatus::Stopped {
+            bail!("session '{name}' was stopped during startup");
+        }
+        metadata.command = command_parts;
+        metadata.status = SessionStatus::Running;
+        metadata.child_pid = child.process_id();
+        metadata.child_start_time = child.process_id().and_then(process_start_time);
+        metadata.updated_at_unix = now_unix();
+        save_metadata(&metadata)?;
+
+        let mut output_reader = master
+            .try_clone_reader()
+            .context("failed to clone PTY reader")?;
+        let mut input_writer = master.take_writer().context("failed to take PTY writer")?;
+
+        let output_dir = session_dir.clone();
+        let output_thread = thread::spawn(move || capture_output(&mut output_reader, &output_dir));
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let input_stop = Arc::clone(&stop);
+        let input_thread =
+            thread::spawn(move || forward_input(input_fifo, &mut input_writer, &input_stop));
+
+        let exit_status = child.wait().context("failed while waiting for child")?;
+        let exit_code = Some(exit_status.exit_code());
+
+        // Stop and join the input forwarder so its thread, FIFO fd, and dup'd
+        // PTY master writer are released instead of leaking for the daemon's
+        // lifetime.
+        stop.store(true, Ordering::Relaxed);
+        let _ = input_thread.join();
+        drop(master);
+
+        // Drain remaining output, but cap the wait: backgrounded grandchildren
+        // can hold the PTY slave open so the reader never sees EOF. Returning
+        // anyway lets the caller mark the session Stopped instead of blocking
+        // forever.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !output_thread.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        Ok((format!("{exit_status:?}"), exit_code))
+    })();
+
+    // On any failure after the child was spawned, reap it so it never lingers
+    // as an unreaped zombie in the daemon (which would wedge stop/shutdown).
+    if outcome.is_err() {
         let _ = child.kill();
         let _ = child.wait();
-        bail!("session '{name}' was stopped during startup");
     }
-    metadata.command = command_parts;
-    metadata.status = SessionStatus::Running;
-    metadata.child_pid = child.process_id();
-    metadata.child_start_time = child.process_id().and_then(process_start_time);
-    metadata.updated_at_unix = now_unix();
-    save_metadata(&metadata)?;
-
-    let mut output_reader = pair
-        .master
-        .try_clone_reader()
-        .context("failed to clone PTY reader")?;
-    let mut input_writer = pair
-        .master
-        .take_writer()
-        .context("failed to take PTY writer")?;
-
-    let output_dir = session_dir.clone();
-    let output_thread = thread::spawn(move || capture_output(&mut output_reader, &output_dir));
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let input_stop = Arc::clone(&stop);
-    let input_thread =
-        thread::spawn(move || forward_input(input_fifo, &mut input_writer, &input_stop));
-
-    let exit_status = child.wait().context("failed while waiting for child")?;
-    let exit_code = Some(exit_status.exit_code());
-
-    // Stop and join the input forwarder so its thread, FIFO fd, and dup'd PTY
-    // master writer are released instead of leaking for the daemon's lifetime.
-    stop.store(true, Ordering::Relaxed);
-    let _ = input_thread.join();
-    drop(pair.master);
-
-    // Drain remaining output, but cap the wait: backgrounded grandchildren can
-    // hold the PTY slave open so the reader never sees EOF. Returning anyway
-    // lets the caller mark the session Stopped instead of blocking forever.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !output_thread.is_finished() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(20));
-    }
-
-    Ok((format!("{exit_status:?}"), exit_code))
+    outcome
 }
 
 pub fn send_input(name: &str, text: &str, no_enter: bool) -> Result<()> {
@@ -659,8 +666,15 @@ pub fn mark_stopped(name: &str, exit_status: Option<String>, exit_code: Option<u
 
 pub fn load_metadata(name: &str) -> Result<SessionMetadata> {
     let path = session_dir(name)?.join(METADATA);
-    let contents =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("no such session '{name}'");
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()));
+        }
+    };
     serde_json::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))
 }
 

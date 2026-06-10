@@ -4,12 +4,18 @@ use std::{
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
+    time::Duration,
 };
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::paths::socket_path;
+
+/// How long the client waits for the daemon to accept input or produce a
+/// response before giving up. A suspended or wedged daemon would otherwise hang
+/// every command forever with no diagnostic.
+const CLIENT_IO_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -66,6 +72,13 @@ pub fn try_send_daemon_request(request: &DaemonRequest) -> Result<Option<DaemonR
         }
     };
 
+    stream
+        .set_read_timeout(Some(CLIENT_IO_TIMEOUT))
+        .context("failed to set daemon read timeout")?;
+    stream
+        .set_write_timeout(Some(CLIENT_IO_TIMEOUT))
+        .context("failed to set daemon write timeout")?;
+
     serde_json::to_writer(&mut stream, request).context("failed to write daemon request")?;
     stream
         .write_all(b"\n")
@@ -74,9 +87,21 @@ pub fn try_send_daemon_request(request: &DaemonRequest) -> Result<Option<DaemonR
 
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    reader
-        .read_line(&mut line)
-        .context("failed to read daemon response")?;
+    reader.read_line(&mut line).map_err(|error| {
+        if matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        ) {
+            anyhow::anyhow!(
+                "daemon at {} accepted the connection but did not respond within {}s; \
+                 it may be suspended or wedged — restart it or rerun with --direct",
+                path.display(),
+                CLIENT_IO_TIMEOUT.as_secs()
+            )
+        } else {
+            anyhow::Error::new(error).context("failed to read daemon response")
+        }
+    })?;
     if line.is_empty() {
         bail!("daemon closed connection without a response");
     }
