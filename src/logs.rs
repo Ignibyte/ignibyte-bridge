@@ -16,7 +16,8 @@ use std::{
 use anyhow::{Context, Result};
 
 use crate::{
-    paths::write_atomic, CLEAN_LOG, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
+    clean::AnsiCleaner, paths::write_atomic, CLEAN_LOG, RAW_LOG, SCREEN_COLS, SCREEN_ROWS,
+    SCREEN_SNAPSHOT,
 };
 
 pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> Result<()> {
@@ -33,6 +34,8 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
         .open(session_dir.join(CLEAN_LOG))
         .context("failed to open clean log")?;
     let mut terminal = vt100::Parser::new(SCREEN_ROWS, SCREEN_COLS, 2_000);
+    let mut cleaner = AnsiCleaner::default();
+    let mut clean = Vec::new();
     let mut buffer = [0_u8; 8192];
 
     loop {
@@ -47,7 +50,8 @@ pub fn capture_output(reader: &mut Box<dyn Read + Send>, session_dir: &Path) -> 
             .context("failed to write raw log")?;
         raw_log.flush().context("failed to flush raw log")?;
 
-        let clean = strip_ansi_escapes::strip(chunk);
+        clean.clear();
+        cleaner.clean(chunk, &mut clean);
         clean_log
             .write_all(&clean)
             .context("failed to write clean log")?;

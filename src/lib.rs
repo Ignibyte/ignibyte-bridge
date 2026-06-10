@@ -1,5 +1,6 @@
 //! Local persistent PTY session controller for AI coding agents.
 
+pub mod clean;
 pub mod daemon;
 pub mod doctor;
 pub mod keys;
