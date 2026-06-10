@@ -8,10 +8,12 @@ keep them running, drive them with keystrokes, and read back what's on their
 screen. It gives an agent the same thing tmux or iTerm give a human: a live
 terminal it can watch and type into, exposed through a small CLI.
 
-> Status: working prototype. The full design and roadmap live in
-> [`docs/AGENT-BRIDGE.md`](docs/AGENT-BRIDGE.md). A complete adversarial code
-> review and its resolutions are in
-> [`docs/CODE-REVIEW-2026-06-10.md`](docs/CODE-REVIEW-2026-06-10.md).
+> Status: working prototype — validated driving a live Claude Code session. How
+> the internals work is in [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md); the
+> design and roadmap are in [`docs/AGENT-BRIDGE.md`](docs/AGENT-BRIDGE.md); the
+> adversarial reviews and their resolutions are in
+> [`docs/CODE-REVIEW-2026-06-10.md`](docs/CODE-REVIEW-2026-06-10.md) and
+> [`docs/CODE-REVIEW-2026-06-10-fixes.md`](docs/CODE-REVIEW-2026-06-10-fixes.md).
 
 ## Why not just capture stdout?
 
@@ -121,6 +123,56 @@ To tell whether a session is still working or waiting for input, poll `status`
 and watch `idle_seconds` — it counts seconds since the session last produced
 output, so a value that stops climbing means the program has gone quiet (e.g.
 Claude has finished responding). `list` shows the same as an `idle=` column.
+
+## Driving an interactive TUI (Claude Code)
+
+The bridge can drive a full-screen terminal program the way a human would —
+reading its rendered screen and sending keystrokes. Here is the end-to-end flow
+for Claude Code (validated live):
+
+```bash
+export AGENT_BRIDGE_HOME=/tmp/agent-bridge-live
+
+# 1. Start Claude in a real PTY. Roomier geometry renders its UI better.
+agent-bridge --direct start claude --cmd claude --cwd /path/to/repo --rows 50 --cols 200
+
+# 2. Read the rendered screen to see what Claude is showing.
+agent-bridge --direct screen claude --tail 60
+```
+
+On first use in a directory Claude shows a trust prompt. The bridge sees it on
+the `screen`; answer it by sending the highlighted choice's key — here, Enter
+confirms "Yes, I trust this folder":
+
+```bash
+agent-bridge --direct keys claude enter
+```
+
+Then prompt Claude and wait for it to finish. `send` submits the prompt (it
+delivers the Enter as a separate keystroke so Claude's editor treats it as a
+submit, not a newline). Poll `idle_seconds` to detect completion — it sits near
+0 while Claude streams output and climbs once Claude goes quiet:
+
+```bash
+agent-bridge --direct send claude "Read NOTES.md and summarize it in one sentence."
+
+# wait until idle_seconds stops being ~0 (Claude finished responding), then read:
+agent-bridge --direct status claude | grep idle_seconds
+agent-bridge --direct screen claude --tail 40
+
+# cancel a running response with Escape or Ctrl-C; stop the session when done:
+agent-bridge --direct keys claude escape
+agent-bridge --direct stop claude
+```
+
+Notes for driving TUIs:
+
+- Use `screen` (the rendered viewport), not `read` (the linear log), to see a
+  full-screen UI — `read` is best for linear programs (shells, REPLs).
+- `send` auto-submits. To type without submitting (e.g. to fill a field then
+  navigate), use `send --no-enter` and drive with `keys`.
+- Menu navigation is `keys up`/`keys down`/`keys enter`; dialogs usually dismiss
+  with `keys escape`.
 
 ## Storage layout
 

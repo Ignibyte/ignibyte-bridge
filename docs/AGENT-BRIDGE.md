@@ -363,9 +363,16 @@ Acceptance tests:
 
 Goal: make the bridge useful for manager-agent workflows.
 
+Status: started. Idle/busy detection is implemented — `status`/`list` report
+`idle_seconds`/`output_bytes` (derived from `raw.log` mtime/size), so a manager
+can tell whether a session is still producing output or has gone quiet. Validated
+driving a live Claude Code session: navigating the trust prompt with `keys`,
+submitting a prompt with `send`, polling `idle_seconds` for completion, and
+reading the response from `screen`.
+
 Scope:
 
-- idle/busy detection,
+- idle/busy detection — **done** (`idle_seconds`),
 - approval prompt detection,
 - per-session git status snapshots,
 - changed-file summaries,
@@ -376,9 +383,9 @@ Scope:
 
 Acceptance tests:
 
-- manager can tell whether Claude is still working or waiting,
+- manager can tell whether Claude is still working or waiting — **passing**,
 - manager can see changed files after a session,
-- manager can safely stop or hand off a session.
+- manager can safely stop or hand off a session — **passing**.
 
 ## Command Surface
 
