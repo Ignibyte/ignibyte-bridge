@@ -109,7 +109,7 @@ fn warn_once<E: std::fmt::Display>(warned: &mut bool, sink: &str, result: Result
     if let Err(error) = result {
         if !*warned {
             *warned = true;
-            eprintln!("agent-bridge: {sink} write failed (continuing): {error}");
+            eprintln!("ignibyte-bridge: {sink} write failed (continuing): {error}");
         }
     }
 }
@@ -157,8 +157,8 @@ pub fn tail_file(path: &Path, tail: usize) -> Result<String> {
     const BLOCK: usize = 64 * 1024;
     const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
-    let mut file = std::fs::File::open(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let len = file
         .metadata()
         .with_context(|| format!("failed to inspect {}", path.display()))?
@@ -260,7 +260,8 @@ mod tests {
     fn tail_file_returns_last_lines_and_tolerates_non_utf8() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         // Lines plus an invalid UTF-8 byte that must not break tailing.
-        file.write_all(b"one\ntwo\nthree\n\xff\xfe\nfour\n").unwrap();
+        file.write_all(b"one\ntwo\nthree\n\xff\xfe\nfour\n")
+            .unwrap();
         file.flush().unwrap();
         let out = tail_file(file.path(), 2).unwrap();
         assert!(out.ends_with("four\n"), "got {out:?}");

@@ -166,7 +166,10 @@ mod tests {
     fn lone_cr_becomes_newline() {
         // A `\r` between text is a line break; a trailing `\r` stays buffered
         // (it may begin a `\r\n`) and so is not emitted at end of stream.
-        assert_eq!(clean_str(b"frame1\rframe2\rframe3"), "frame1\nframe2\nframe3");
+        assert_eq!(
+            clean_str(b"frame1\rframe2\rframe3"),
+            "frame1\nframe2\nframe3"
+        );
         assert_eq!(clean_str(b"frame1\rframe2\r"), "frame1\nframe2");
     }
 

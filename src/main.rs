@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
-use agent_bridge::{
+use ignibyte_bridge::{
     daemon::{run_daemon, shutdown_daemon_direct},
     doctor::doctor,
     paths::resolve_cwd,
@@ -95,7 +95,7 @@ enum Commands {
         /// Session name.
         name: String,
     },
-    /// Run the local Agent Bridge daemon.
+    /// Run the local Ignibyte Bridge daemon.
     Daemon,
     /// Ask the running daemon to stop all sessions and exit.
     Shutdown,

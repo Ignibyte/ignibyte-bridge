@@ -1,8 +1,8 @@
-# Agent Bridge
+# Ignibyte Bridge
 
 Local persistent PTY session controller for AI coding agents.
 
-Agent Bridge lets a manager program — another AI agent, a script, or you — start
+Ignibyte Bridge lets a manager program — another AI agent, a script, or you — start
 real terminal programs (Claude Code, Codex CLI, REPLs, dev servers, shells),
 keep them running, drive them with keystrokes, and read back what's on their
 screen. It gives an agent the same thing tmux or iTerm give a human: a live
@@ -10,7 +10,7 @@ terminal it can watch and type into, exposed through a small CLI.
 
 > Status: working prototype — validated driving a live Claude Code session. How
 > the internals work is in [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md); the
-> design and roadmap are in [`docs/AGENT-BRIDGE.md`](docs/AGENT-BRIDGE.md); the
+> design and roadmap are in [`docs/DESIGN.md`](docs/DESIGN.md); the
 > adversarial reviews and their resolutions are in
 > [`docs/CODE-REVIEW-2026-06-10.md`](docs/CODE-REVIEW-2026-06-10.md) and
 > [`docs/CODE-REVIEW-2026-06-10-fixes.md`](docs/CODE-REVIEW-2026-06-10-fixes.md).
@@ -19,7 +19,7 @@ terminal it can watch and type into, exposed through a small CLI.
 
 Terminal programs aren't append-only text streams. They draw into an alternate
 screen, move the cursor, repaint status lines, and expect real keys (Escape,
-Ctrl-C, arrows, Tab). So Agent Bridge keeps three views of every session:
+Ctrl-C, arrows, Tab). So Ignibyte Bridge keeps three views of every session:
 
 - **`raw.log`** — exact PTY bytes, for replay and debugging.
 - **`clean.log`** — ANSI-stripped readable text, for line-oriented `read`.
@@ -30,9 +30,9 @@ Ctrl-C, arrows, Tab). So Agent Bridge keeps three views of every session:
 
 ```text
 manager agent / you
-        │  CLI  (agent-bridge start | send | keys | read | screen | ...)
+        │  CLI  (ignibyte-bridge start | send | keys | read | screen | ...)
         ▼
-agent-bridge client ──► running daemon?
+ignibyte-bridge client ──► running daemon?
         │ yes                         │ no
         ▼                             ▼
 Unix-socket daemon            detached supervisor process (setsid)
@@ -42,12 +42,12 @@ Unix-socket daemon            detached supervisor process (setsid)
                    ▼
         PTY child (claude / python3 -i / sh / …)
         + raw.log, clean.log, screen.txt, metadata.json under
-          ~/.agent-bridge/sessions/<name>/
+          ~/.ignibyte-bridge/sessions/<name>/
 ```
 
 There are two execution modes:
 
-- **Daemon mode** — run `agent-bridge daemon` once; it owns sessions and
+- **Daemon mode** — run `ignibyte-bridge daemon` once; it owns sessions and
   outlives short-lived client commands. Client commands automatically route
   through its Unix socket when it's reachable. This is the durable setup.
 - **Direct mode** — with no daemon (or `--direct`), `start` spawns a detached
@@ -62,10 +62,10 @@ Requires a Rust toolchain (2021 edition). macOS and Linux.
 
 ```bash
 cargo build --release
-# binary at target/release/agent-bridge
+# binary at target/release/ignibyte-bridge
 ```
 
-The examples below use `agent-bridge` for the built binary.
+The examples below use `ignibyte-bridge` for the built binary.
 
 ## Quickstart
 
@@ -73,28 +73,28 @@ Daemon mode, end to end (note the single `export` so the daemon and every
 client share one home and socket):
 
 ```bash
-export AGENT_BRIDGE_HOME=/tmp/agent-bridge-demo
+export IGNIBYTE_BRIDGE_HOME=/tmp/ignibyte-bridge-demo
 
 # Start the daemon in its own terminal (it runs in the foreground):
-agent-bridge daemon
+ignibyte-bridge daemon
 
-# In another terminal (same AGENT_BRIDGE_HOME):
-export AGENT_BRIDGE_HOME=/tmp/agent-bridge-demo
-agent-bridge start py --cmd "python3 -i"
-agent-bridge send  py "print(2 + 3)"
-agent-bridge read  py --tail 20      # -> 5
-agent-bridge screen py --tail 40     # current rendered screen
-agent-bridge stop  py
-agent-bridge shutdown                # stops sessions and exits the daemon
+# In another terminal (same IGNIBYTE_BRIDGE_HOME):
+export IGNIBYTE_BRIDGE_HOME=/tmp/ignibyte-bridge-demo
+ignibyte-bridge start py --cmd "python3 -i"
+ignibyte-bridge send  py "print(2 + 3)"
+ignibyte-bridge read  py --tail 20      # -> 5
+ignibyte-bridge screen py --tail 40     # current rendered screen
+ignibyte-bridge stop  py
+ignibyte-bridge shutdown                # stops sessions and exits the daemon
 ```
 
 Direct mode (no daemon needed):
 
 ```bash
-agent-bridge --direct start sh --cmd sh
-agent-bridge --direct send  sh "echo hello"
-agent-bridge --direct read  sh --tail 10
-agent-bridge --direct stop  sh
+ignibyte-bridge --direct start sh --cmd sh
+ignibyte-bridge --direct send  sh "echo hello"
+ignibyte-bridge --direct read  sh --tail 10
+ignibyte-bridge --direct stop  sh
 ```
 
 ## Commands
@@ -116,8 +116,8 @@ agent-bridge --direct stop  sh
 Global flag: `--direct` bypasses the daemon and runs the command in-process.
 
 To send text that begins with a dash, it's forwarded as-is
-(`agent-bridge send py "-1 + 2"`); to send a literal flag like `--help`, use the
-`--` separator: `agent-bridge send py -- --help`.
+(`ignibyte-bridge send py "-1 + 2"`); to send a literal flag like `--help`, use the
+`--` separator: `ignibyte-bridge send py -- --help`.
 
 To tell whether a session is still working or waiting for input, poll `status`
 and watch `idle_seconds` — it counts seconds since the session last produced
@@ -131,13 +131,13 @@ reading its rendered screen and sending keystrokes. Here is the end-to-end flow
 for Claude Code (validated live):
 
 ```bash
-export AGENT_BRIDGE_HOME=/tmp/agent-bridge-live
+export IGNIBYTE_BRIDGE_HOME=/tmp/ignibyte-bridge-live
 
 # 1. Start Claude in a real PTY. Roomier geometry renders its UI better.
-agent-bridge --direct start claude --cmd claude --cwd /path/to/repo --rows 50 --cols 200
+ignibyte-bridge --direct start claude --cmd claude --cwd /path/to/repo --rows 50 --cols 200
 
 # 2. Read the rendered screen to see what Claude is showing.
-agent-bridge --direct screen claude --tail 60
+ignibyte-bridge --direct screen claude --tail 60
 ```
 
 On first use in a directory Claude shows a trust prompt. The bridge sees it on
@@ -145,7 +145,7 @@ the `screen`; answer it by sending the highlighted choice's key — here, Enter
 confirms "Yes, I trust this folder":
 
 ```bash
-agent-bridge --direct keys claude enter
+ignibyte-bridge --direct keys claude enter
 ```
 
 Then prompt Claude and wait for it to finish. `send` submits the prompt (it
@@ -154,15 +154,15 @@ submit, not a newline). Poll `idle_seconds` to detect completion — it sits nea
 0 while Claude streams output and climbs once Claude goes quiet:
 
 ```bash
-agent-bridge --direct send claude "Read NOTES.md and summarize it in one sentence."
+ignibyte-bridge --direct send claude "Read NOTES.md and summarize it in one sentence."
 
 # wait until idle_seconds stops being ~0 (Claude finished responding), then read:
-agent-bridge --direct status claude | grep idle_seconds
-agent-bridge --direct screen claude --tail 40
+ignibyte-bridge --direct status claude | grep idle_seconds
+ignibyte-bridge --direct screen claude --tail 40
 
 # cancel a running response with Escape or Ctrl-C; stop the session when done:
-agent-bridge --direct keys claude escape
-agent-bridge --direct stop claude
+ignibyte-bridge --direct keys claude escape
+ignibyte-bridge --direct stop claude
 ```
 
 Notes for driving TUIs:
@@ -176,11 +176,11 @@ Notes for driving TUIs:
 
 ## Storage layout
 
-All state lives under `AGENT_BRIDGE_HOME` (default `~/.agent-bridge`):
+All state lives under `IGNIBYTE_BRIDGE_HOME` (default `~/.ignibyte-bridge`):
 
 ```text
-~/.agent-bridge/
-  agent-bridge.sock        # daemon control socket (0600)
+~/.ignibyte-bridge/
+  ignibyte-bridge.sock        # daemon control socket (0600)
   daemon.lock              # daemon singleton lock
   sessions/
     <name>/
@@ -195,10 +195,10 @@ All state lives under `AGENT_BRIDGE_HOME` (default `~/.agent-bridge`):
 
 ## Environment
 
-- **`AGENT_BRIDGE_HOME`** — storage root. Must be an **absolute** path. Use a
+- **`IGNIBYTE_BRIDGE_HOME`** — storage root. Must be an **absolute** path. Use a
   per-user location; do not point it at a shared directory like `/tmp/shared`
   (see Security). For an isolated scratch instance, a private temp dir works:
-  `AGENT_BRIDGE_HOME="$(mktemp -d)" agent-bridge list`.
+  `IGNIBYTE_BRIDGE_HOME="$(mktemp -d)" ignibyte-bridge list`.
 - **`PATH`** — used to resolve bare command names. `~/.local/bin` is prepended
   so `claude` resolves the way your login shell resolves it. In daemon mode the
   client forwards its own `PATH` so sessions run with your environment, not the
@@ -206,15 +206,15 @@ All state lives under `AGENT_BRIDGE_HOME` (default `~/.agent-bridge`):
 
 ## Security
 
-Agent Bridge is local-only and single-user by design:
+Ignibyte Bridge is local-only and single-user by design:
 
 - The control socket and FIFO are `0600`; session directories are `0700` and all
   log/metadata files are `0600`, so other local users can't read transcripts or
   inject input.
 - **Logs capture everything typed and printed in a session**, including any
-  secrets (API keys, passwords at prompts). Treat `~/.agent-bridge` as
+  secrets (API keys, passwords at prompts). Treat `~/.ignibyte-bridge` as
   sensitive; it is not encrypted.
-- `AGENT_BRIDGE_HOME` is validated (absolute path, no symlinked or
+- `IGNIBYTE_BRIDGE_HOME` is validated (absolute path, no symlinked or
   foreign-owned components) and files are created with `O_NOFOLLOW`. Even so,
   keep it under a directory only you can write.
 - The daemon protocol is unauthenticated beyond the socket's `0600` permission:
@@ -230,14 +230,14 @@ across a daemon restart.
 ## Troubleshooting
 
 - **A command won't start / "stopped while starting"** — run
-  `agent-bridge doctor --cmd "<cmd>" --cwd <dir>` to see how the command
+  `ignibyte-bridge doctor --cmd "<cmd>" --cwd <dir>` to see how the command
   resolves, the effective `PATH`, and (for `claude`) whether the resolved binary
   matches your login shell.
 - **Commands hang against a daemon** — the daemon may be suspended; the client
   times out after 60s with a clear message. Restart the daemon, or use
   `--direct`.
 - **Leftover test processes** — detached supervisors run under `setsid`; if a
-  crash leaves one, `pkill -f 'agent-bridge supervisor'`.
+  crash leaves one, `pkill -f 'ignibyte-bridge supervisor'`.
 
 ## Development
 
@@ -251,3 +251,13 @@ cargo llvm-cov --html      # coverage report (requires cargo-llvm-cov)
 The crate is a thin `main.rs` over a library split into focused modules
 (`session`, `daemon`, `logs`, `clean`, `paths`, `protocol`, `keys`, `procinfo`,
 `doctor`); run `cargo doc --open` for the API docs.
+
+## About
+
+Built by [Ignibyte](https://ignibyte.com) — we ship production-ready software in
+days, not months, and open-source the tools we can. Ignibyte Bridge is one of
+those tools; the security gate we run on every build is
+[Scorchkit](https://github.com/Ignibyte/scorchkit), and our code-intelligence
+sidecar is [Ignibyte Forge](https://github.com/Ignibyte/ignibyte-forge).
+
+Released under the [MIT License](LICENSE).

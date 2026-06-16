@@ -31,7 +31,9 @@ mod platform {
                 size,
             );
             if written == size {
-                Some((info.pbi_start_tvsec as u64) << 20 | (info.pbi_start_tvusec as u64 & 0xf_ffff))
+                Some(
+                    (info.pbi_start_tvsec as u64) << 20 | (info.pbi_start_tvusec as u64 & 0xf_ffff),
+                )
             } else {
                 None
             }

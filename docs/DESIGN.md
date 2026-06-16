@@ -1,6 +1,6 @@
-# Agent Bridge
+# Ignibyte Bridge
 
-Agent Bridge is a local terminal-session controller for AI coding agents.
+Ignibyte Bridge is a local terminal-session controller for AI coding agents.
 
 The long-term goal is not to replace iTerm or tmux. It is to provide the same
 core capability they expose to agents today: a persistent real terminal session
@@ -18,11 +18,11 @@ Codex / Rusty / another manager agent
         |
         | CLI or MCP tools
         v
-agent-bridge client
+ignibyte-bridge client
         |
         | local Unix socket
         v
-agent-bridge daemon
+ignibyte-bridge daemon
         |
         | owns PTYs, terminal screen buffers, logs, metadata
         v
@@ -37,7 +37,7 @@ until explicitly stopped.
 
 ## Current Prototype
 
-The prototype lives in `agent-bridge/`.
+The prototype lives in `ignibyte-bridge/`.
 
 Implemented:
 
@@ -68,41 +68,41 @@ daemon request timeouts and size limits; and input/forwarder fd lifecycle fixes.
 - Session files are stored under:
 
 ```text
-~/.agent-bridge/sessions/{session-name}/raw.log
-~/.agent-bridge/sessions/{session-name}/clean.log
-~/.agent-bridge/sessions/{session-name}/screen.txt
-~/.agent-bridge/sessions/{session-name}/metadata.json
-~/.agent-bridge/sessions/{session-name}/input.fifo
+~/.ignibyte-bridge/sessions/{session-name}/raw.log
+~/.ignibyte-bridge/sessions/{session-name}/clean.log
+~/.ignibyte-bridge/sessions/{session-name}/screen.txt
+~/.ignibyte-bridge/sessions/{session-name}/metadata.json
+~/.ignibyte-bridge/sessions/{session-name}/input.fifo
 ```
 
-`AGENT_BRIDGE_HOME` can override the storage root for tests. Use a private
+`IGNIBYTE_BRIDGE_HOME` can override the storage root for tests. Use a private
 per-user directory (it must be an absolute path; symlinked or foreign-owned
-roots are rejected), not a shared location like `/tmp/agent-bridge`:
+roots are rejected), not a shared location like `/tmp/ignibyte-bridge`:
 
 ```bash
-AGENT_BRIDGE_HOME="$(mktemp -d)" ./target/debug/agent-bridge list
+IGNIBYTE_BRIDGE_HOME="$(mktemp -d)" ./target/debug/ignibyte-bridge list
 ```
 
 Verified so far:
 
 - `python3 -i` works as an interactive PTY session.
-- `python3 -i` also works through `agent-bridge daemon` with start/send/screen,
+- `python3 -i` also works through `ignibyte-bridge daemon` with start/send/screen,
   status/list, and stop.
 - `shutdown` stops a daemon-owned Python session before exiting the daemon.
 - `claude --version` works under the PTY and logs output.
-- Interactive Claude works through `agent-bridge daemon`; `/help` can be sent
+- Interactive Claude works through `ignibyte-bridge daemon`; `/help` can be sent
   and read back through `screen`.
-- Interactive Claude works when Agent Bridge resolves the command to the same
+- Interactive Claude works when Ignibyte Bridge resolves the command to the same
   Claude binary used by the user's login shell.
 - Claude `/help` works through `send`, and `keys escape` dismisses the help
   dialog.
-- In the current macOS environment, `/Users/chadpeppers/.local/bin/claude`
+- In the current macOS environment, `~/.local/bin/claude`
   reported Claude Code `2.1.170` during the latest daemon smoke test and works
-  through Agent Bridge.
+  through Ignibyte Bridge.
 - `/opt/homebrew/bin/claude` reports Claude Code `2.1.81` and can start but
   may emit zero PTY bytes in project directories.
-- `doctor --cmd claude --cwd /Users/chadpeppers/Projects/rusty` confirms that
-  Agent Bridge and the login shell currently resolve to the same working Claude
+- `doctor --cmd claude --cwd ~/Projects/rusty` confirms that
+  Ignibyte Bridge and the login shell currently resolve to the same working Claude
   binary.
 
 That Claude result gives two design signals: command resolution must match the
@@ -125,7 +125,7 @@ Terminal apps do not only print append-only lines. They may:
 iTerm and tmux work for agent control because they maintain a rendered terminal
 buffer. Agents are reading the current screen, not only a byte stream.
 
-Agent Bridge needs both:
+Ignibyte Bridge needs both:
 
 - `raw.log`: exact PTY bytes for replay/debugging.
 - `clean.log`: readable append-only text when a process behaves linearly.
@@ -135,7 +135,7 @@ Agent Bridge needs both:
 
 ### Daemon
 
-`agent-bridge daemon` should be the durable owner of all sessions.
+`ignibyte-bridge daemon` should be the durable owner of all sessions.
 
 Responsibilities:
 
@@ -158,19 +158,19 @@ stop frequently; terminal sessions should not.
 The normal commands should become thin clients over the daemon:
 
 ```bash
-agent-bridge start claude --cwd /path/to/repo --cmd claude
-agent-bridge send claude "Review the failing tests."
-agent-bridge keys claude enter
-agent-bridge screen claude --tail 80
-agent-bridge read claude --tail 300
-agent-bridge status claude
-agent-bridge list
-agent-bridge stop claude
-agent-bridge shutdown
+ignibyte-bridge start claude --cwd /path/to/repo --cmd claude
+ignibyte-bridge send claude "Review the failing tests."
+ignibyte-bridge keys claude enter
+ignibyte-bridge screen claude --tail 80
+ignibyte-bridge read claude --tail 300
+ignibyte-bridge status claude
+ignibyte-bridge list
+ignibyte-bridge stop claude
+ignibyte-bridge shutdown
 ```
 
 If the daemon is not running, the client can either fail with a clear message or
-start it automatically. For early development, explicit `agent-bridge daemon`
+start it automatically. For early development, explicit `ignibyte-bridge daemon`
 is simpler.
 
 ### Local Protocol
@@ -193,7 +193,7 @@ becomes useful.
 MCP is a good interface for Codex/Rusty to control sessions, but MCP should not
 own session state.
 
-`agent-bridge mcp` should be a thin MCP server that forwards tool calls to the
+`ignibyte-bridge mcp` should be a thin MCP server that forwards tool calls to the
 daemon over the Unix socket.
 
 Candidate MCP tools:
@@ -241,7 +241,7 @@ The current prototype unsets those variables and maintains a `vt100` rendered
 screen. Remaining compatibility work is around terminal resize, bracketed paste,
 idle/busy detection, approval detection, and daemon-owned session lifetime.
 
-Agent Bridge should also resolve bare command names using the PATH it gives to
+Ignibyte Bridge should also resolve bare command names using the PATH it gives to
 the child process. On macOS, `~/.local/bin` must be placed before Homebrew paths
 so `claude` resolves to the same binary that iTerm/login shells use.
 
@@ -325,11 +325,11 @@ Remaining: recovery of daemon-owned sessions across a daemon restart.
 
 Scope:
 
-- `agent-bridge daemon`,
+- `ignibyte-bridge daemon`,
 - Unix socket command protocol,
 - session registry in daemon memory,
 - client CLI forwards commands to daemon,
-- metadata persisted under `~/.agent-bridge/sessions`,
+- metadata persisted under `~/.ignibyte-bridge/sessions`,
 - daemon recovers stopped/running metadata on restart.
 
 Acceptance tests:
@@ -342,11 +342,11 @@ Acceptance tests:
 
 ### Phase 4: MCP Server Adapter
 
-Goal: make Codex/Rusty call Agent Bridge through MCP tools.
+Goal: make Codex/Rusty call Ignibyte Bridge through MCP tools.
 
 Scope:
 
-- `agent-bridge mcp`,
+- `ignibyte-bridge mcp`,
 - JSON schema for session tools,
 - tool calls forward to the daemon,
 - screen/log responses are capped and agent-readable,
@@ -392,27 +392,27 @@ Acceptance tests:
 Initial service-era CLI:
 
 ```bash
-agent-bridge daemon
-agent-bridge doctor --cmd claude --cwd /path/to/repo
-agent-bridge start claude --cwd /path/to/repo --cmd claude
-agent-bridge send claude "Review the failing tests."
-agent-bridge send claude "no trailing newline" --no-enter
-agent-bridge keys claude ctrl-c
-agent-bridge screen claude --tail 120
-agent-bridge read claude --tail 300
-agent-bridge status claude
-agent-bridge list
-agent-bridge stop claude
+ignibyte-bridge daemon
+ignibyte-bridge doctor --cmd claude --cwd /path/to/repo
+ignibyte-bridge start claude --cwd /path/to/repo --cmd claude
+ignibyte-bridge send claude "Review the failing tests."
+ignibyte-bridge send claude "no trailing newline" --no-enter
+ignibyte-bridge keys claude ctrl-c
+ignibyte-bridge screen claude --tail 120
+ignibyte-bridge read claude --tail 300
+ignibyte-bridge status claude
+ignibyte-bridge list
+ignibyte-bridge stop claude
 ```
 
 Possible future commands:
 
 ```bash
-agent-bridge attach claude
-agent-bridge git claude status
-agent-bridge git claude diff
-agent-bridge events claude
-agent-bridge mcp
+ignibyte-bridge attach claude
+ignibyte-bridge git claude status
+ignibyte-bridge git claude diff
+ignibyte-bridge events claude
+ignibyte-bridge mcp
 ```
 
 ## Storage Layout
@@ -420,7 +420,7 @@ agent-bridge mcp
 Target layout:
 
 ```text
-~/.agent-bridge/
+~/.ignibyte-bridge/
   config.toml
   daemon.sock
   sessions/
@@ -445,7 +445,7 @@ can live in daemon memory and be served over the socket.
 - Which terminal parser gives the best balance of correctness and simplicity:
   `vt100`, `termwiz`, or another parser?
 - How much scrollback should be retained in memory?
-- Should MCP be bundled into the daemon binary as `agent-bridge mcp`, or run as
+- Should MCP be bundled into the daemon binary as `ignibyte-bridge mcp`, or run as
   a separate small binary?
 - Should the bridge create per-agent git worktrees by default, or only on
   request?
@@ -456,7 +456,7 @@ Implement Phase 3 before adding HTTP or broader workflow features.
 
 Concretely:
 
-1. Add `agent-bridge daemon`.
+1. Add `ignibyte-bridge daemon`.
 2. Add a local Unix socket protocol.
 3. Convert CLI commands into thin clients that talk to the daemon.
 4. Keep the existing supervisor model as a fallback until the daemon path is
@@ -464,11 +464,11 @@ Concretely:
 5. Re-run the Claude interactive smoke test:
 
 ```bash
-agent-bridge start claude-smoke --cwd /Users/chadpeppers/Projects/rusty --cmd claude
-agent-bridge screen claude-smoke --tail 80
-agent-bridge send claude-smoke "/help"
-agent-bridge screen claude-smoke --tail 120
-agent-bridge stop claude-smoke
+ignibyte-bridge start claude-smoke --cwd ~/Projects/rusty --cmd claude
+ignibyte-bridge screen claude-smoke --tail 80
+ignibyte-bridge send claude-smoke "/help"
+ignibyte-bridge screen claude-smoke --tail 120
+ignibyte-bridge stop claude-smoke
 ```
 
 The phase is done when the bridge can read Claude's visible terminal state the

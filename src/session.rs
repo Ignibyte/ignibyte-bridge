@@ -31,11 +31,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     keys::encode_key,
     logs::{capture_output, forward_input, tail_file, tail_lines},
-    procinfo::process_start_time,
     paths::{
         child_path, create_private_file, ensure_bridge_dir, parse_command, resolve_cwd,
         resolve_program_path, session_dir, sessions_root, validate_session_name, write_atomic,
     },
+    procinfo::process_start_time,
     CLEAN_LOG, INPUT_FIFO, METADATA, RAW_LOG, SCREEN_COLS, SCREEN_ROWS, SCREEN_SNAPSHOT,
 };
 

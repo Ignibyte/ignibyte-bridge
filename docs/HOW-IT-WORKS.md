@@ -1,4 +1,4 @@
-# How Agent Bridge Works
+# How Ignibyte Bridge Works
 
 This document explains the internals: the process model, how a session runs end
 to end, the input/output paths, and the concurrency model that keeps it correct
@@ -24,7 +24,7 @@ into focused modules:
 
 A session is a child process (Claude, a REPL, a shell …) running inside a
 pseudo-terminal (PTY). Something must *own* that PTY for the session's lifetime —
-hold the master fd, feed it input, and drain its output. Agent Bridge has two
+hold the master fd, feed it input, and drain its output. Ignibyte Bridge has two
 owners depending on mode:
 
 ```
@@ -35,7 +35,7 @@ owners depending on mode:
                         ▼                      ▼
                  DAEMON MODE          detached supervisor process
             ┌───────────────────┐     (setsid; survives the CLI
-            │  agent-bridge     │      command that spawned it)
+            │  ignibyte-bridge     │      command that spawned it)
             │  daemon           │             │
             │  • owns sessions  │             │
             │    in threads     │             ▼
@@ -44,7 +44,7 @@ owners depending on mode:
               owns PTY children
 ```
 
-- **Daemon mode** — `agent-bridge daemon` runs a Unix-socket server. Each session
+- **Daemon mode** — `ignibyte-bridge daemon` runs a Unix-socket server. Each session
   is owned by a thread inside the daemon process (so `supervisor_pid` is absent
   for daemon-owned sessions; the `child_pid` is the tracked process). CLI
   commands auto-route through the socket when it is reachable.
@@ -52,7 +52,7 @@ owners depending on mode:
   binary as a hidden `supervisor` subcommand, detached with `setsid` so it
   outlives the short-lived CLI process. That supervisor owns the PTY.
 
-Both write the same files under `AGENT_BRIDGE_HOME`, so read-side commands
+Both write the same files under `IGNIBYTE_BRIDGE_HOME`, so read-side commands
 (`read`/`screen`/`status`/`list`) work regardless of which started the session —
 they just read files. Only `start`/`send`/`keys`/`stop`/`shutdown` need to reach
 the owner (via the socket, or via the FIFO and signals).
@@ -205,8 +205,8 @@ reaping a child that ignored the group signal.
 ## Files on disk
 
 ```
-$AGENT_BRIDGE_HOME/
-  agent-bridge.sock        # daemon control socket (0600)
+$IGNIBYTE_BRIDGE_HOME/
+  ignibyte-bridge.sock        # daemon control socket (0600)
   daemon.lock              # daemon singleton lock
   sessions/<name>/
     metadata.json          # status, pids+tokens, generation, geometry, exit (0600, atomic)
@@ -219,7 +219,7 @@ $AGENT_BRIDGE_HOME/
     raw.log.prev           # previous run's logs, kept on restart
 ```
 
-See [`AGENT-BRIDGE.md`](AGENT-BRIDGE.md) for the design rationale and roadmap, and
+See [`DESIGN.md`](DESIGN.md) for the design rationale and roadmap, and
 the [`CODE-REVIEW-2026-06-10.md`](CODE-REVIEW-2026-06-10.md) /
 [`-fixes.md`](CODE-REVIEW-2026-06-10-fixes.md) reports for the audit trail behind
 these invariants.

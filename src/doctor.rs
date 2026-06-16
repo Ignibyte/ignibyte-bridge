@@ -28,7 +28,7 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
         .unwrap_or_else(|| command_parts[0].clone());
     let executable_found = is_executable(Path::new(&resolved_program));
 
-    println!("agent-bridge doctor");
+    println!("ignibyte-bridge doctor");
     println!("sessions_root: {}", sessions_root()?.display());
     println!("cwd: {}", cwd.display());
     println!("input_command: {cmd}");
@@ -52,10 +52,10 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
     // For Claude specifically, derive warnings from observed behavior rather
     // than hardcoded install paths: does the resolved binary actually report a
     // version, and does the login shell resolve `claude` to the same binary
-    // Agent Bridge would spawn?
+    // Ignibyte Bridge would spawn?
     if command_is_claude(&command_parts[0]) || command_is_claude(&resolved_program) {
         println!();
-        println!("claude_version_via_agent_bridge_path:");
+        println!("claude_version_via_ignibyte_bridge_path:");
         let bridge_version = Command::new(&resolved_program)
             .arg("--version")
             .current_dir(&cwd)
@@ -68,7 +68,7 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
         // A unique sentinel before `command -v` makes the path robust to dotfile
         // banners that print to stdout on login.
         let login_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        const SENTINEL: &str = "__AGENT_BRIDGE_CLAUDE__";
+        const SENTINEL: &str = "__IGNIBYTE_BRIDGE_CLAUDE__";
         println!();
         println!("claude_resolution_via_login_shell ({login_shell}):");
         let login = Command::new(&login_shell)
@@ -98,7 +98,7 @@ pub fn doctor(cmd: &str, cwd: Option<PathBuf>) -> Result<()> {
         }
         match login_path {
             Some(login_path) if login_path != resolved_program => warnings.push(format!(
-                "login shell resolves claude to '{login_path}', but Agent Bridge resolves '{resolved_program}'; sessions may run a different binary than your terminal."
+                "login shell resolves claude to '{login_path}', but Ignibyte Bridge resolves '{resolved_program}'; sessions may run a different binary than your terminal."
             )),
             // No path found (claude not on the login shell's PATH, or the shell
             // was unavailable) — that is not necessarily a problem, so stay quiet.

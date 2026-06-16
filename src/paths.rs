@@ -44,11 +44,11 @@ pub fn sessions_root() -> Result<PathBuf> {
 }
 
 pub fn socket_path() -> Result<PathBuf> {
-    Ok(bridge_root()?.join("agent-bridge.sock"))
+    Ok(bridge_root()?.join("ignibyte-bridge.sock"))
 }
 
 pub fn bridge_root() -> Result<PathBuf> {
-    bridge_root_from(std::env::var_os("AGENT_BRIDGE_HOME"))
+    bridge_root_from(std::env::var_os("IGNIBYTE_BRIDGE_HOME"))
 }
 
 pub fn bridge_root_from(override_root: Option<OsString>) -> Result<PathBuf> {
@@ -56,7 +56,7 @@ pub fn bridge_root_from(override_root: Option<OsString>) -> Result<PathBuf> {
         let root = PathBuf::from(root);
         if !root.is_absolute() {
             bail!(
-                "AGENT_BRIDGE_HOME must be an absolute path, got {}",
+                "IGNIBYTE_BRIDGE_HOME must be an absolute path, got {}",
                 root.display()
             );
         }
@@ -64,7 +64,7 @@ pub fn bridge_root_from(override_root: Option<OsString>) -> Result<PathBuf> {
     }
 
     let base_dirs = BaseDirs::new().ok_or_else(|| anyhow!("failed to locate home directory"))?;
-    Ok(base_dirs.home_dir().join(".agent-bridge"))
+    Ok(base_dirs.home_dir().join(".ignibyte-bridge"))
 }
 
 /// Create `path` (and missing parents) as a private directory and verify it is
@@ -165,8 +165,7 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
 
     if let Err(error) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
-        return Err(error)
-            .with_context(|| format!("failed to replace {}", path.display()));
+        return Err(error).with_context(|| format!("failed to replace {}", path.display()));
     }
 
     Ok(())
@@ -310,7 +309,10 @@ mod tests {
     #[test]
     fn validate_session_name_accepts_safe_names() {
         for name in ["a", "claude-main", "py_3", "v1.2", "ABC.def-123"] {
-            assert!(validate_session_name(name).is_ok(), "{name} should be valid");
+            assert!(
+                validate_session_name(name).is_ok(),
+                "{name} should be valid"
+            );
         }
     }
 

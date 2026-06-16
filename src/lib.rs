@@ -1,6 +1,6 @@
 //! Local persistent PTY session controller for AI coding agents.
 //!
-//! Agent Bridge starts real terminal programs (Claude Code, REPLs, dev servers,
+//! Ignibyte Bridge starts real terminal programs (Claude Code, REPLs, dev servers,
 //! shells) inside a pseudo-terminal, keeps them running, and lets a manager
 //! program drive them with keystrokes and read back their rendered screen — the
 //! capability tmux/iTerm give a human, exposed as a CLI.
@@ -26,7 +26,7 @@
 //!
 //! A session is owned either by a long-lived [`daemon`] (when its socket is
 //! reachable) or, in direct mode, by a detached `setsid` supervisor process.
-//! Both write the same on-disk state under `AGENT_BRIDGE_HOME`, so read-side
+//! Both write the same on-disk state under `IGNIBYTE_BRIDGE_HOME`, so read-side
 //! commands work regardless of which started the session.
 
 pub mod clean;

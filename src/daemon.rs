@@ -57,7 +57,7 @@ pub fn run_daemon() -> Result<()> {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
         .with_context(|| format!("failed to chmod {}", path.display()))?;
 
-    println!("agent-bridge daemon listening on {}", path.display());
+    println!("ignibyte-bridge daemon listening on {}", path.display());
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -78,14 +78,14 @@ pub fn run_daemon() -> Result<()> {
 fn acquire_daemon_lock(root: &std::path::Path) -> Result<fs::File> {
     use std::os::unix::io::AsRawFd;
 
-    let lock = create_private_file(&root.join("daemon.lock"))
-        .context("failed to open daemon lock")?;
+    let lock =
+        create_private_file(&root.join("daemon.lock")).context("failed to open daemon lock")?;
     // SAFETY: the fd is valid and owned by `lock` for the duration of the call.
     let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if rc != 0 {
         let error = std::io::Error::last_os_error();
         if matches!(error.raw_os_error(), Some(libc::EWOULDBLOCK)) {
-            bail!("another agent-bridge daemon is already running or starting");
+            bail!("another ignibyte-bridge daemon is already running or starting");
         }
         return Err(error).context("failed to lock daemon");
     }

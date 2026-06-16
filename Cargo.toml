@@ -1,8 +1,15 @@
 [package]
-name = "agent-bridge"
+name = "ignibyte-bridge"
 version = "0.1.0"
 edition = "2021"
 description = "Local persistent PTY session controller for AI coding agents"
+authors = ["Ignibyte"]
+license = "MIT"
+repository = "https://github.com/Ignibyte/ignibyte-bridge"
+homepage = "https://github.com/Ignibyte/ignibyte-bridge"
+readme = "README.md"
+keywords = ["pty", "terminal", "agent", "tmux", "automation"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1"

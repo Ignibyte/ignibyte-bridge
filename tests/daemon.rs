@@ -49,13 +49,13 @@ fn full_lifecycle_through_daemon() {
         .success()
         .stdout(predicate::str::contains("supervisor pid: daemon"));
 
-    home.cmd().args(["send", "d1", "via-daemon"]).assert().success();
-    assert!(read_contains(&home, "d1", "via-daemon"));
-
     home.cmd()
-        .args(["screen", "d1"])
+        .args(["send", "d1", "via-daemon"])
         .assert()
         .success();
+    assert!(read_contains(&home, "d1", "via-daemon"));
+
+    home.cmd().args(["screen", "d1"]).assert().success();
     home.cmd().args(["status", "d1"]).assert().success();
     home.cmd()
         .args(["list"])
@@ -67,7 +67,9 @@ fn full_lifecycle_through_daemon() {
 
     // Shutdown stops the daemon and removes the socket.
     home.cmd().args(["shutdown"]).assert().success();
-    assert!(wait_until(Duration::from_secs(5), || !home.socket().exists()));
+    assert!(wait_until(Duration::from_secs(5), || !home
+        .socket()
+        .exists()));
     drop(daemon);
 }
 
@@ -77,7 +79,10 @@ fn shutdown_stops_running_sessions() {
     let _daemon = DaemonGuard::start(&home);
     let _guard = SessionGuard::new(&home, "s1");
 
-    home.cmd().args(["start", "s1", "--cmd", "cat"]).assert().success();
+    home.cmd()
+        .args(["start", "s1", "--cmd", "cat"])
+        .assert()
+        .success();
     let child_pid = pid_field(&home, "s1", "child_pid").expect("child pid");
     assert!(process_alive(child_pid));
 
@@ -98,9 +103,10 @@ fn client_falls_back_to_direct_without_daemon() {
         .args(["start", "fb", "--cmd", "cat"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("supervisor pid:").and(
-            predicate::str::contains("supervisor pid: daemon").not(),
-        ));
+        .stdout(
+            predicate::str::contains("supervisor pid:")
+                .and(predicate::str::contains("supervisor pid: daemon").not()),
+        );
 }
 
 #[test]

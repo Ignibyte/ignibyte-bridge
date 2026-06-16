@@ -1,6 +1,6 @@
 //! Shared integration-test harness.
 //!
-//! Every test runs against its own `AGENT_BRIDGE_HOME` temp dir, set per
+//! Every test runs against its own `IGNIBYTE_BRIDGE_HOME` temp dir, set per
 //! `Command` (never `std::env::set_var`, which is process-global and racy under
 //! the parallel test runner). Guards make a best effort to tear down detached
 //! `setsid` supervisors so a failing test cannot leak `cat`/`sleep` processes
@@ -42,7 +42,7 @@ pub struct TestHome {
 impl TestHome {
     pub fn new() -> Self {
         TestHome {
-            dir: TempDir::new().expect("create temp AGENT_BRIDGE_HOME"),
+            dir: TempDir::new().expect("create temp IGNIBYTE_BRIDGE_HOME"),
         }
     }
 
@@ -51,7 +51,7 @@ impl TestHome {
     }
 
     pub fn socket(&self) -> PathBuf {
-        self.dir.path().join("agent-bridge.sock")
+        self.dir.path().join("ignibyte-bridge.sock")
     }
 
     pub fn session_dir(&self, name: &str) -> PathBuf {
@@ -61,8 +61,8 @@ impl TestHome {
     /// An `assert_cmd` Command for the binary, scoped to this home. `--direct`
     /// is not added, so commands route through a daemon if one is running.
     pub fn cmd(&self) -> Command {
-        let mut cmd = Command::cargo_bin("agent-bridge").expect("locate agent-bridge binary");
-        cmd.env("AGENT_BRIDGE_HOME", self.dir.path());
+        let mut cmd = Command::cargo_bin("ignibyte-bridge").expect("locate ignibyte-bridge binary");
+        cmd.env("IGNIBYTE_BRIDGE_HOME", self.dir.path());
         cmd
     }
 
@@ -144,13 +144,13 @@ pub struct DaemonGuard {
 }
 
 impl DaemonGuard {
-    /// Spawn `agent-bridge daemon` against `home` and wait for its socket.
+    /// Spawn `ignibyte-bridge daemon` against `home` and wait for its socket.
     pub fn start(home: &TestHome) -> Self {
         let log = std::fs::File::create(home.path().join("daemon.out")).expect("daemon log");
         let err = log.try_clone().expect("clone daemon log");
-        let child = StdCommand::new(cargo_bin("agent-bridge"))
+        let child = StdCommand::new(cargo_bin("ignibyte-bridge"))
             .arg("daemon")
-            .env("AGENT_BRIDGE_HOME", home.path())
+            .env("IGNIBYTE_BRIDGE_HOME", home.path())
             .stdin(std::process::Stdio::null())
             .stdout(log)
             .stderr(err)
@@ -159,10 +159,9 @@ impl DaemonGuard {
 
         let socket = home.socket();
         assert!(
-            wait_until(Duration::from_secs(10), || std::os::unix::net::UnixStream::connect(
-                &socket
-            )
-            .is_ok()),
+            wait_until(Duration::from_secs(10), || {
+                std::os::unix::net::UnixStream::connect(&socket).is_ok()
+            }),
             "daemon socket did not appear"
         );
 

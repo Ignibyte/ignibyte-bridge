@@ -38,7 +38,8 @@ fn start_send_read_stop_lifecycle() {
     assert!(read_contains(&home, "life", "marker-alpha"));
 
     home.direct().args(["stop", "life"]).assert().success();
-    assert!(wait_until(Duration::from_secs(5), || home.status_field("life")
+    assert!(wait_until(Duration::from_secs(5), || home
+        .status_field("life")
         == "Stopped"));
 }
 
@@ -57,7 +58,10 @@ fn no_enter_then_keys_enter_submits() {
         .args(["send", "ne", "held-line", "--no-enter"])
         .assert()
         .success();
-    home.direct().args(["keys", "ne", "enter"]).assert().success();
+    home.direct()
+        .args(["keys", "ne", "enter"])
+        .assert()
+        .success();
     assert!(read_contains(&home, "ne", "held-line"));
 }
 
@@ -70,9 +74,13 @@ fn ctrl_d_ends_session() {
         .args(["start", "eof", "--cmd", "cat"])
         .assert()
         .success();
-    home.direct().args(["keys", "eof", "ctrl-d"]).assert().success();
+    home.direct()
+        .args(["keys", "eof", "ctrl-d"])
+        .assert()
+        .success();
     assert!(
-        wait_until(Duration::from_secs(5), || home.status_field("eof") == "Stopped"),
+        wait_until(Duration::from_secs(5), || home.status_field("eof")
+            == "Stopped"),
         "ctrl-d should end cat"
     );
 }
@@ -155,7 +163,10 @@ fn large_send_is_delivered_fully() {
         .map(|i| format!("line{i:04}"))
         .collect::<Vec<_>>()
         .join("\n");
-    home.direct().args(["send", "big", &payload]).assert().success();
+    home.direct()
+        .args(["send", "big", &payload])
+        .assert()
+        .success();
 
     assert!(read_contains(&home, "big", "line3999"));
 }
@@ -166,8 +177,7 @@ fn restart_bumps_generation_and_preserves_prior_logs() {
     let _guard = SessionGuard::new(&home, "re");
 
     let gen = |home: &TestHome| -> u64 {
-        let text =
-            std::fs::read_to_string(home.session_dir("re").join("metadata.json")).unwrap();
+        let text = std::fs::read_to_string(home.session_dir("re").join("metadata.json")).unwrap();
         let needle = "\"generation\":";
         let start = text.find(needle).unwrap() + needle.len();
         let rest = text[start..].trim_start();
@@ -175,19 +185,33 @@ fn restart_bumps_generation_and_preserves_prior_logs() {
         rest[..end].trim().parse().unwrap()
     };
 
-    home.direct().args(["start", "re", "--cmd", "cat"]).assert().success();
-    home.direct().args(["send", "re", "first-run"]).assert().success();
+    home.direct()
+        .args(["start", "re", "--cmd", "cat"])
+        .assert()
+        .success();
+    home.direct()
+        .args(["send", "re", "first-run"])
+        .assert()
+        .success();
     assert!(read_contains(&home, "re", "first-run"));
     assert_eq!(gen(&home), 1);
     home.direct().args(["stop", "re"]).assert().success();
-    assert!(wait_until(Duration::from_secs(5), || home.status_field("re") == "Stopped"));
+    assert!(wait_until(Duration::from_secs(5), || home
+        .status_field("re")
+        == "Stopped"));
 
     // Restart the same name: generation bumps, prior logs are kept as .prev, and
     // the new run works.
-    home.direct().args(["start", "re", "--cmd", "cat"]).assert().success();
+    home.direct()
+        .args(["start", "re", "--cmd", "cat"])
+        .assert()
+        .success();
     assert_eq!(gen(&home), 2);
     assert!(home.session_dir("re").join("raw.log.prev").exists());
-    home.direct().args(["send", "re", "second-run"]).assert().success();
+    home.direct()
+        .args(["send", "re", "second-run"])
+        .assert()
+        .success();
     assert!(read_contains(&home, "re", "second-run"));
 }
 
@@ -199,7 +223,13 @@ fn custom_pty_geometry_is_applied() {
     // The child should see the requested terminal size.
     home.direct()
         .args([
-            "start", "geo", "--rows", "50", "--cols", "200", "--cmd",
+            "start",
+            "geo",
+            "--rows",
+            "50",
+            "--cols",
+            "200",
+            "--cmd",
             "sh -c 'stty size; cat'",
         ])
         .assert()
@@ -276,8 +306,14 @@ fn list_reports_empty_then_sorted_sessions() {
 
     let _a = SessionGuard::new(&home, "aaa");
     let _b = SessionGuard::new(&home, "bbb");
-    home.direct().args(["start", "bbb", "--cmd", "cat"]).assert().success();
-    home.direct().args(["start", "aaa", "--cmd", "cat"]).assert().success();
+    home.direct()
+        .args(["start", "bbb", "--cmd", "cat"])
+        .assert()
+        .success();
+    home.direct()
+        .args(["start", "aaa", "--cmd", "cat"])
+        .assert()
+        .success();
 
     let output = home.direct().args(["list"]).output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout);
@@ -291,8 +327,14 @@ fn status_reports_activity_and_idle_grows() {
     let home = TestHome::new();
     let _guard = SessionGuard::new(&home, "act");
 
-    home.direct().args(["start", "act", "--cmd", "cat"]).assert().success();
-    home.direct().args(["send", "act", "ping"]).assert().success();
+    home.direct()
+        .args(["start", "act", "--cmd", "cat"])
+        .assert()
+        .success();
+    home.direct()
+        .args(["send", "act", "ping"])
+        .assert()
+        .success();
     assert!(read_contains(&home, "act", "ping"));
 
     // Right after output, status reports activity fields and low idle.
